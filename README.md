@@ -22,12 +22,8 @@
 ### 1. 安装依赖
 
 ```bash
-# 后端
+# 后端（其中的一个终端）
 pip install -r backend/requirements.txt
-# 前端
-cd frontend
-npm install
-cd ..
 ```
 
 ### 2. 配置环境变量
@@ -42,7 +38,7 @@ $env:DEEPSEEK_API_KEY = "这里输入api"
 # 终端 1：启动后端
 python backend/run.py
 
-# 终端 2：启动前端
+# 终端 2：启动前端（另一个终端）
 cd frontend
 npm run dev
 ```
