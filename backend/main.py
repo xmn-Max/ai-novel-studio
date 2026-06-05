@@ -10,6 +10,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from models import ConvertRequest, ConvertResponse
@@ -21,7 +22,7 @@ app = FastAPI(title="AI Novel Studio API", version="0.2.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -317,3 +318,10 @@ async def regenerate(task_id: str, req: RegenerateRequest, user: dict = Depends(
 
     await _run_pipeline(task_id, enriched_text, genre, title)
     return tasks[task_id].get("result", {})
+
+
+# --- Serve frontend in production ---
+
+FRONTEND_DIST = Path(__file__).parent.parent / "frontend" / "dist"
+if FRONTEND_DIST.exists():
+    app.mount("/", StaticFiles(directory=str(FRONTEND_DIST), html=True), name="frontend")

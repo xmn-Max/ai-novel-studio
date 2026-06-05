@@ -45,7 +45,7 @@ export interface ConversionResult {
 const API_BASE = '/api';
 
 function getToken(): string {
-  return localStorage.getItem('auth_token') || '';
+  return sessionStorage.getItem('auth_token') || '';
 }
 
 function authHeaders(): Record<string, string> {
@@ -72,7 +72,7 @@ export async function register(username: string, password: string): Promise<Auth
     throw new Error(err.detail || '注册失败');
   }
   const data = await res.json();
-  localStorage.setItem('auth_token', data.token);
+  sessionStorage.setItem('auth_token', data.token);
   return data;
 }
 
@@ -87,7 +87,7 @@ export async function login(username: string, password: string): Promise<AuthUse
     throw new Error(err.detail || '登录失败');
   }
   const data = await res.json();
-  localStorage.setItem('auth_token', data.token);
+  sessionStorage.setItem('auth_token', data.token);
   return data;
 }
 
@@ -97,7 +97,7 @@ export async function fetchCurrentUser(): Promise<{ username: string } | null> {
   try {
     const res = await fetch(`${API_BASE}/auth/me`, { headers: authHeaders() });
     if (!res.ok) {
-      localStorage.removeItem('auth_token');
+      sessionStorage.removeItem('auth_token');
       return null;
     }
     return res.json();
@@ -107,7 +107,7 @@ export async function fetchCurrentUser(): Promise<{ username: string } | null> {
 }
 
 export function logout() {
-  localStorage.removeItem('auth_token');
+  sessionStorage.removeItem('auth_token');
 }
 
 export async function startConversion(text: string, genre: string, title: string): Promise<{ task_id: string }> {

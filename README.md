@@ -22,7 +22,7 @@
 ### 1. 安装依赖
 
 ```bash
-# 后端（其中的一个终端）
+# 后端（即其中的一个终端）
 pip install -r backend/requirements.txt
 ```
 
@@ -47,7 +47,7 @@ npm run dev
 
 ## 项目结构
 
-```
+```   
 ai-novel-studio/
 ├── backend/
 │   ├── main.py          # FastAPI 应用入口
