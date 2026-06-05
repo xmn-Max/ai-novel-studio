@@ -44,10 +44,76 @@ export interface ConversionResult {
 
 const API_BASE = '/api';
 
+function getToken(): string {
+  return localStorage.getItem('auth_token') || '';
+}
+
+function authHeaders(): Record<string, string> {
+  const token = getToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+// --- Auth ---
+
+export interface AuthUser {
+  username: string;
+  token: string;
+  created_at?: string;
+}
+
+export async function register(username: string, password: string): Promise<AuthUser> {
+  const res = await fetch(`${API_BASE}/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || '注册失败');
+  }
+  const data = await res.json();
+  localStorage.setItem('auth_token', data.token);
+  return data;
+}
+
+export async function login(username: string, password: string): Promise<AuthUser> {
+  const res = await fetch(`${API_BASE}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || '登录失败');
+  }
+  const data = await res.json();
+  localStorage.setItem('auth_token', data.token);
+  return data;
+}
+
+export async function fetchCurrentUser(): Promise<{ username: string } | null> {
+  const token = getToken();
+  if (!token) return null;
+  try {
+    const res = await fetch(`${API_BASE}/auth/me`, { headers: authHeaders() });
+    if (!res.ok) {
+      localStorage.removeItem('auth_token');
+      return null;
+    }
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
+export function logout() {
+  localStorage.removeItem('auth_token');
+}
+
 export async function startConversion(text: string, genre: string): Promise<{ task_id: string }> {
   const res = await fetch(`${API_BASE}/convert`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ text, genre }),
   });
 
@@ -65,7 +131,8 @@ export function subscribeProgress(
   onComplete: () => void,
   onError: (err: string) => void,
 ): () => void {
-  const es = new EventSource(`${API_BASE}/convert/${taskId}/progress`);
+  const token = getToken();
+  const es = new EventSource(`${API_BASE}/convert/${taskId}/progress?token=${encodeURIComponent(token)}`);
 
   es.onmessage = (event) => {
     try {
@@ -97,10 +164,11 @@ export interface GenreItem {
   name: string;
   guidance: string;
   keywords: string[];
+  readonly?: boolean;
 }
 
 export async function fetchGenres(): Promise<GenreItem[]> {
-  const res = await fetch(`${API_BASE}/genres`);
+  const res = await fetch(`${API_BASE}/genres`, { headers: authHeaders() });
   if (!res.ok) throw new Error('获取类型列表失败');
   return res.json();
 }
@@ -108,7 +176,7 @@ export async function fetchGenres(): Promise<GenreItem[]> {
 export async function addGenre(item: GenreItem): Promise<GenreItem> {
   const res = await fetch(`${API_BASE}/genres`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(item),
   });
   if (!res.ok) {
@@ -121,7 +189,7 @@ export async function addGenre(item: GenreItem): Promise<GenreItem> {
 export async function updateGenre(index: number, item: GenreItem): Promise<GenreItem> {
   const res = await fetch(`${API_BASE}/genres/${index}`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(item),
   });
   if (!res.ok) {
@@ -134,6 +202,7 @@ export async function updateGenre(index: number, item: GenreItem): Promise<Genre
 export async function deleteGenre(index: number): Promise<void> {
   const res = await fetch(`${API_BASE}/genres/${index}`, {
     method: 'DELETE',
+    headers: authHeaders(),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
@@ -142,7 +211,7 @@ export async function deleteGenre(index: number): Promise<void> {
 }
 
 export async function fetchResult(taskId: string): Promise<ConversionResult> {
-  const res = await fetch(`${API_BASE}/convert/${taskId}/result`);
+  const res = await fetch(`${API_BASE}/convert/${taskId}/result`, { headers: authHeaders() });
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));

@@ -7,6 +7,10 @@ import {
   addGenre,
   updateGenre,
   deleteGenre,
+  register,
+  login,
+  fetchCurrentUser,
+  logout,
   ProgressEvent,
   ConversionResult,
   GenreItem,
@@ -134,6 +138,15 @@ export default function App() {
   const [editGenreGuidance, setEditGenreGuidance] = useState('');
   const [editGenreKeywords, setEditGenreKeywords] = useState('');
   const [genreError, setGenreError] = useState('');
+
+  const [username, setUsername] = useState('');
+  const [loggedIn, setLoggedIn] = useState(false);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [authUsername, setAuthUsername] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authError, setAuthError] = useState('');
+
   const [taskId, setTaskId] = useState<string | null>(null);
   const [progress, setProgress] = useState<ProgressEvent | null>(null);
   const [result, setResult] = useState<ConversionResult | null>(null);
@@ -188,6 +201,61 @@ export default function App() {
     setResult(null);
     setError(null);
   }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const user = await fetchCurrentUser();
+        if (user) {
+          setUsername(user.username);
+          setLoggedIn(true);
+        }
+      } catch {
+        // not logged in
+      }
+      setAuthLoading(false);
+    })();
+  }, []);
+
+  const handleRegister = useCallback(async () => {
+    setAuthError('');
+    try {
+      const user = await register(authUsername, authPassword);
+      setUsername(user.username);
+      setLoggedIn(true);
+    } catch (err: unknown) {
+      setAuthError(err instanceof Error ? err.message : '注册失败');
+    }
+  }, [authUsername, authPassword]);
+
+  const handleLogin = useCallback(async () => {
+    setAuthError('');
+    try {
+      const user = await login(authUsername, authPassword);
+      setUsername(user.username);
+      setLoggedIn(true);
+    } catch (err: unknown) {
+      setAuthError(err instanceof Error ? err.message : '登录失败');
+    }
+  }, [authUsername, authPassword]);
+
+  const handleLogout = useCallback(() => {
+    logout();
+    setLoggedIn(false);
+    setUsername('');
+    setPhase('idle');
+    setText('');
+    setResult(null);
+  }, []);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        authMode === 'login' ? handleLogin() : handleRegister();
+      }
+    },
+    [authMode, handleLogin, handleRegister]
+  );
 
   const loadGenres = useCallback(async () => {
     try {
@@ -256,13 +324,110 @@ export default function App() {
 
   return (
     <div className="min-h-screen py-6 px-4">
+      {authLoading ? (
+        <div className="flex items-center justify-center h-64">
+          <p className="text-slate-400">加载中...</p>
+        </div>
+      ) : !loggedIn ? (
+        /* Login / Register */
+        <div className="max-w-sm mx-auto mt-16">
+          <header className="text-center mb-8">
+            <h1 className="text-2xl font-bold text-slate-800 tracking-wide">
+              AI 剧本创作助手
+            </h1>
+            <p className="text-slate-500 text-sm mt-1">
+              登录后开始使用
+            </p>
+          </header>
+
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+            <div className="flex mb-5 border-b border-slate-200">
+              <button
+                onClick={() => { setAuthMode('login'); setAuthError(''); }}
+                className={`flex-1 pb-2.5 text-sm font-medium border-b-2 transition-colors ${
+                  authMode === 'login'
+                    ? 'border-indigo-500 text-indigo-600'
+                    : 'border-transparent text-slate-400 hover:text-slate-600'
+                }`}
+              >
+                登录
+              </button>
+              <button
+                onClick={() => { setAuthMode('register'); setAuthError(''); }}
+                className={`flex-1 pb-2.5 text-sm font-medium border-b-2 transition-colors ${
+                  authMode === 'register'
+                    ? 'border-indigo-500 text-indigo-600'
+                    : 'border-transparent text-slate-400 hover:text-slate-600'
+                }`}
+              >
+                注册
+              </button>
+            </div>
+
+            {authError && (
+              <div className="mb-3 p-2 bg-red-50 border border-red-200 rounded text-sm text-red-600">
+                {authError}
+              </div>
+            )}
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-slate-500">用户名</label>
+                <input
+                  value={authUsername}
+                  onChange={(e) => setAuthUsername(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="输入用户名"
+                  className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg text-sm
+                             focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">密码</label>
+                <input
+                  type="password"
+                  value={authPassword}
+                  onChange={(e) => setAuthPassword(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="输入密码"
+                  className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg text-sm
+                             focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                />
+              </div>
+              <button
+                onClick={authMode === 'login' ? handleLogin : handleRegister}
+                className="w-full py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-lg
+                           hover:bg-indigo-700 transition-colors"
+              >
+                {authMode === 'login' ? '登录' : '注册'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        /* Main App */
+      <>
       <header className="text-center mb-8">
-        <h1 className="text-2xl font-bold text-slate-800 tracking-wide">
-          AI 剧本创作助手
-        </h1>
-        <p className="text-slate-500 text-sm mt-1">
-          将小说章节一键转换为标准剧本格式
-        </p>
+        <div className="flex items-center justify-between max-w-4xl mx-auto">
+          <div />
+          <div>
+            <h1 className="text-2xl font-bold text-slate-800 tracking-wide">
+              AI 剧本创作助手
+            </h1>
+            <p className="text-slate-500 text-sm mt-1">
+              将小说章节一键转换为标准剧本格式
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-slate-500">{username}</span>
+            <button
+              onClick={handleLogout}
+              className="text-xs text-slate-400 hover:text-red-500 transition-colors"
+            >
+              退出
+            </button>
+          </div>
+        </div>
       </header>
 
       <main className="max-w-4xl mx-auto space-y-6">
@@ -559,6 +724,7 @@ export default function App() {
                     <th className="text-left px-3 py-2 text-slate-500 font-medium">名称</th>
                     <th className="text-left px-3 py-2 text-slate-500 font-medium">描述</th>
                     <th className="text-left px-3 py-2 text-slate-500 font-medium">关键词</th>
+                    <th className="text-center px-3 py-2 text-slate-500 font-medium w-24">来源</th>
                     <th className="text-center px-3 py-2 text-slate-500 font-medium w-20">操作</th>
                   </tr>
                 </thead>
@@ -566,21 +732,22 @@ export default function App() {
                   {genres.map((g, i) => (
                     <tr key={i} className="border-t border-slate-100 hover:bg-slate-50">
                       <td className="px-3 py-2 font-medium text-slate-700">{g.name}</td>
-                      <td className="px-3 py-2 text-slate-500 max-w-[200px] truncate">{g.guidance}</td>
+                      <td className="px-3 py-2 text-slate-500 max-w-[160px] truncate">{g.guidance}</td>
                       <td className="px-3 py-2 text-slate-400 text-xs">{g.keywords?.join(', ') || '-'}</td>
                       <td className="px-3 py-2 text-center">
-                        <button
-                          onClick={() => handleEditGenre(i)}
-                          className="text-indigo-500 hover:text-indigo-700 text-xs mr-1"
-                        >
-                          编辑
-                        </button>
-                        <button
-                          onClick={() => handleDeleteGenre(i)}
-                          className="text-red-400 hover:text-red-600 text-xs"
-                        >
-                          删除
-                        </button>
+                        <span className={`text-xs px-1.5 py-0.5 rounded ${g.readonly ? 'bg-slate-100 text-slate-400' : 'bg-indigo-50 text-indigo-500'}`}>
+                          {g.readonly ? '系统' : '自定义'}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        {!g.readonly ? (
+                          <>
+                            <button onClick={() => handleEditGenre(i)} className="text-indigo-500 hover:text-indigo-700 text-xs mr-1">编辑</button>
+                            <button onClick={() => handleDeleteGenre(i)} className="text-red-400 hover:text-red-600 text-xs">删除</button>
+                          </>
+                        ) : (
+                          <span className="text-slate-300 text-xs">-</span>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -590,9 +757,14 @@ export default function App() {
 
             {/* Add / Edit form */}
             <div className="border-t border-slate-200 pt-4 space-y-3">
-              <h3 className="text-sm font-semibold text-slate-600">
-                {editGenreIndex !== null ? `编辑: ${editGenreName}` : '新增类型'}
-              </h3>
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-slate-600">
+                  {editGenreIndex !== null ? `编辑: ${editGenreName}` : '新增类型'}
+                </h3>
+                <span className="text-xs text-slate-400">
+                  自定义: {genres.filter((g) => !g.readonly).length}/10
+                </span>
+              </div>
               <div>
                 <label className="text-xs text-slate-500">名称</label>
                 <input
@@ -627,8 +799,9 @@ export default function App() {
               <div className="flex gap-2">
                 <button
                   onClick={handleSaveGenre}
+                  disabled={editGenreIndex === null && genres.filter((g) => !g.readonly).length >= 10}
                   className="px-4 py-1.5 bg-indigo-600 text-white text-sm rounded-lg
-                             hover:bg-indigo-700 transition-colors"
+                             hover:bg-indigo-700 disabled:bg-slate-300 disabled:text-slate-500 disabled:cursor-not-allowed transition-colors"
                 >
                   {editGenreIndex !== null ? '保存修改' : '添加类型'}
                 </button>
@@ -652,6 +825,8 @@ export default function App() {
           </section>
         )}
       </main>
+      </>
+      )}
     </div>
   );
 }

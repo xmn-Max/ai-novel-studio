@@ -7,15 +7,17 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from models import ConvertRequest, ConvertResponse
 from pipeline import Pipeline
+from auth import register_user, login_user, verify_token
+from auth import get_user_genres, add_user_genre, update_user_genre, delete_user_genre
 
-app = FastAPI(title="AI Novel Studio API", version="0.1.0")
+app = FastAPI(title="AI Novel Studio API", version="0.2.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -39,8 +41,15 @@ def _load_genres() -> list[dict[str, Any]]:
     return [{"name": "叙事", "guidance": "这是一部叙事小说。请重点关注故事结构、人物心理。", "keywords": []}]
 
 
-def _save_genres(genres: list[dict[str, Any]]) -> None:
-    GENRES_FILE.write_text(json.dumps(genres, ensure_ascii=False, indent=2), encoding="utf-8")
+def _merged_genres(username: str) -> list[dict[str, Any]]:
+    system = _load_genres()
+    user = get_user_genres(username)
+    result: list[dict[str, Any]] = []
+    for g in system:
+        result.append({**g, "readonly": True})
+    for g in user:
+        result.append({**g, "readonly": False})
+    return result
 
 
 def _get_pipeline(genre: str = "叙事") -> Pipeline:
@@ -70,7 +79,60 @@ async def _run_pipeline(task_id: str, text: str, genre: str) -> None:
         tasks[task_id]["error"] = str(e)
 
 
-# --- Genre CRUD ---
+def _require_auth(authorization: str = Header(default="")) -> dict:
+    token = ""
+    if authorization.startswith("Bearer "):
+        token = authorization[7:]
+    user = verify_token(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="未登录或登录已过期")
+    return user
+
+
+def _check_auth(token: str = "") -> dict:
+    user = verify_token(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="token 无效")
+    return user
+
+
+# --- Auth ---
+
+class AuthRequest(BaseModel):
+    username: str
+    password: str
+
+
+@app.post("/api/auth/register")
+async def api_register(req: AuthRequest) -> dict[str, str]:
+    if not req.username or not req.password:
+        raise HTTPException(status_code=400, detail="用户名和密码不能为空")
+    if len(req.username) < 2 or len(req.username) > 20:
+        raise HTTPException(status_code=400, detail="用户名长度需在 2-20 之间")
+    if len(req.password) < 4:
+        raise HTTPException(status_code=400, detail="密码至少需要 4 个字符")
+    try:
+        return register_user(req.username.strip(), req.password)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@app.post("/api/auth/login")
+async def api_login(req: AuthRequest) -> dict[str, str]:
+    if not req.username or not req.password:
+        raise HTTPException(status_code=400, detail="用户名和密码不能为空")
+    result = login_user(req.username.strip(), req.password)
+    if not result:
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    return result
+
+
+@app.get("/api/auth/me")
+async def api_me(user: dict = Depends(_require_auth)) -> dict:
+    return {"username": user["username"], "logged_in": True}
+
+
+# --- Genre CRUD (per-user) ---
 
 class GenreItem(BaseModel):
     name: str
@@ -79,51 +141,61 @@ class GenreItem(BaseModel):
 
 
 @app.get("/api/genres")
-async def list_genres() -> list[dict[str, Any]]:
-    return _load_genres()
+async def list_genres(user: dict = Depends(_require_auth)) -> list[dict[str, Any]]:
+    return _merged_genres(user["username"])
 
 
 @app.post("/api/genres")
-async def add_genre(item: GenreItem) -> dict[str, Any]:
-    genres = _load_genres()
-    names = {g["name"] for g in genres}
-    if item.name in names:
+async def add_genre(item: GenreItem, user: dict = Depends(_require_auth)) -> dict[str, Any]:
+    all_genres = _merged_genres(user["username"])
+    if any(g["name"] == item.name for g in all_genres):
         raise HTTPException(status_code=409, detail=f"类型 '{item.name}' 已存在")
-    new_item = {"name": item.name, "guidance": item.guidance, "keywords": item.keywords}
-    genres.append(new_item)
-    _save_genres(genres)
-    return new_item
+    try:
+        return add_user_genre(user["username"], item.name, item.guidance, item.keywords)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.put("/api/genres/{index}")
-async def update_genre(index: int, item: GenreItem) -> dict[str, Any]:
-    genres = _load_genres()
-    if index < 0 or index >= len(genres):
-        raise HTTPException(status_code=404, detail="类型不存在")
-    names = {g["name"] for i, g in enumerate(genres) if i != index}
-    if item.name in names:
+async def update_genre(index: int, item: GenreItem, user: dict = Depends(_require_auth)) -> dict[str, Any]:
+    system = _load_genres()
+    user_genres = get_user_genres(user["username"])
+    system_len = len(system)
+
+    if index < system_len:
+        raise HTTPException(status_code=403, detail="系统默认类型不可修改")
+
+    user_index = index - system_len
+    all_user_names = {g["name"] for i, g in enumerate(user_genres) if i != user_index}
+    if item.name in all_user_names:
         raise HTTPException(status_code=409, detail=f"类型 '{item.name}' 已存在")
-    genres[index] = {"name": item.name, "guidance": item.guidance, "keywords": item.keywords}
-    _save_genres(genres)
-    return genres[index]
+
+    try:
+        return update_user_genre(user["username"], user_index, item.name, item.guidance, item.keywords)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.delete("/api/genres/{index}")
-async def delete_genre(index: int) -> dict[str, str]:
-    genres = _load_genres()
-    if index < 0 or index >= len(genres):
-        raise HTTPException(status_code=404, detail="类型不存在")
-    if len(genres) <= 1:
-        raise HTTPException(status_code=400, detail="至少保留一个类型")
-    deleted = genres.pop(index)
-    _save_genres(genres)
-    return {"deleted": deleted["name"]}
+async def delete_genre(index: int, user: dict = Depends(_require_auth)) -> dict[str, str]:
+    system = _load_genres()
+    system_len = len(system)
+
+    if index < system_len:
+        raise HTTPException(status_code=403, detail="系统默认类型不可删除")
+
+    user_index = index - system_len
+    try:
+        deleted_name = delete_user_genre(user["username"], user_index)
+        return {"deleted": deleted_name}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # --- Conversion ---
 
 @app.post("/api/convert", response_model=ConvertResponse)
-async def convert(request: ConvertRequest) -> ConvertResponse:
+async def convert(request: ConvertRequest, user: dict = Depends(_require_auth)) -> ConvertResponse:
     text = request.text.strip()
     if len(text) < 100:
         raise HTTPException(status_code=400, detail="文本内容过短，至少需要 100 个字符")
@@ -151,7 +223,8 @@ async def convert(request: ConvertRequest) -> ConvertResponse:
 
 
 @app.get("/api/convert/{task_id}/progress")
-async def progress(task_id: str):
+async def progress(task_id: str, token: str = ""):
+    _check_auth(token)
     if task_id not in tasks:
         raise HTTPException(status_code=404, detail="任务不存在")
 
@@ -189,7 +262,7 @@ async def progress(task_id: str):
 
 
 @app.get("/api/convert/{task_id}/result")
-async def result(task_id: str):
+async def result(task_id: str, user: dict = Depends(_require_auth)):
     if task_id not in tasks:
         raise HTTPException(status_code=404, detail="任务不存在")
 

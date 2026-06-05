@@ -24,7 +24,6 @@
 ```bash
 # 后端
 pip install -r backend/requirements.txt
-
 # 前端
 cd frontend
 npm install
