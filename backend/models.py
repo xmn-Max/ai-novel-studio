@@ -5,8 +5,6 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-GENRES = ["武侠", "玄幻", "科幻", "言情", "叙事", "魔幻"]
-
 
 class Dialogue(BaseModel):
     character: str

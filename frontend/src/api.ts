@@ -93,6 +93,54 @@ export function subscribeProgress(
   return () => es.close();
 }
 
+export interface GenreItem {
+  name: string;
+  guidance: string;
+  keywords: string[];
+}
+
+export async function fetchGenres(): Promise<GenreItem[]> {
+  const res = await fetch(`${API_BASE}/genres`);
+  if (!res.ok) throw new Error('获取类型列表失败');
+  return res.json();
+}
+
+export async function addGenre(item: GenreItem): Promise<GenreItem> {
+  const res = await fetch(`${API_BASE}/genres`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(item),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || '添加失败');
+  }
+  return res.json();
+}
+
+export async function updateGenre(index: number, item: GenreItem): Promise<GenreItem> {
+  const res = await fetch(`${API_BASE}/genres/${index}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(item),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || '修改失败');
+  }
+  return res.json();
+}
+
+export async function deleteGenre(index: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/genres/${index}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || '删除失败');
+  }
+}
+
 export async function fetchResult(taskId: string): Promise<ConversionResult> {
   const res = await fetch(`${API_BASE}/convert/${taskId}/result`);
 

@@ -4,6 +4,7 @@ import asyncio
 import json
 import re
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Callable
 
 import yaml
@@ -19,14 +20,39 @@ CHAPTER_PATTERN = re.compile(
 )
 
 TOTAL_STEPS = 7
+GENRES_FILE = Path(__file__).parent / "genres.json"
+
+
+def _load_genre_guidance(genre_name: str) -> str:
+    if GENRES_FILE.exists():
+        try:
+            genres = json.loads(GENRES_FILE.read_text(encoding="utf-8"))
+            for g in genres:
+                if g.get("name") == genre_name:
+                    return g.get("guidance", "")
+        except (json.JSONDecodeError, OSError):
+            pass
+    return prompts.GENRE_GUIDANCE.get(genre_name, "")
+
+
+def _load_genre_keywords(genre_name: str) -> list[str]:
+    if GENRES_FILE.exists():
+        try:
+            genres = json.loads(GENRES_FILE.read_text(encoding="utf-8"))
+            for g in genres:
+                if g.get("name") == genre_name:
+                    return g.get("keywords", [])
+        except (json.JSONDecodeError, OSError):
+            pass
+    return []
 
 
 class Pipeline:
     def __init__(self, api_key: str, genre: str = "叙事") -> None:
         self.client = AsyncOpenAI(api_key=api_key, base_url="https://api.deepseek.com")
         self.model = "deepseek-chat"
-        self.genre = genre if genre in prompts.GENRE_GUIDANCE else "叙事"
-        self.genre_guidance = prompts.GENRE_GUIDANCE.get(self.genre, "")
+        self.genre = genre
+        self.genre_guidance = _load_genre_guidance(genre)
 
     async def run(self, text: str, progress_callback: Callable) -> dict[str, Any]:
         await progress_callback(1, TOTAL_STEPS, "文本清洗", "正在清洗文本格式...")
@@ -177,15 +203,7 @@ class Pipeline:
             return ValidationResult(main_character="", count=0, status="未找到主角")
 
         # Genre-based priority
-        genre_keywords: dict[str, list[str]] = {
-            "武侠": ["侠", "掌门", "宗主", "师兄", "武林", "江湖", "刀", "剑"],
-            "玄幻": ["修", "仙界", "功法", "灵", "道", "天", "神", "圣"],
-            "科幻": ["科学", "博士", "教授", "舰长", "AI", "机器人", "太空"],
-            "言情": ["爱", "情", "恋", "婚", "宠", "妻", "夫"],
-            "叙事": [],
-            "魔幻": ["魔法", "巫师", "咒语", "魔", "龙", "精灵", "预言"],
-        }
-        keywords = genre_keywords.get(self.genre, [])
+        keywords = _load_genre_keywords(self.genre)
         exclude_list: list[str] = []
         if retry and appearance:
             best_name = max(appearance, key=lambda k: appearance[k])

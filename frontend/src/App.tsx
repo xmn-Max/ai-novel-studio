@@ -3,15 +3,18 @@ import {
   startConversion,
   subscribeProgress,
   fetchResult,
+  fetchGenres,
+  addGenre,
+  updateGenre,
+  deleteGenre,
   ProgressEvent,
   ConversionResult,
+  GenreItem,
 } from './api';
 
 type Phase = 'idle' | 'converting' | 'done';
 
 const STEP_LABELS = ['文本清洗', '章节检测', '角色提取', '场景切分', '剧本转换', '主角验证', 'Schema校验'];
-
-const GENRES = ['武侠', '玄幻', '科幻', '言情', '叙事', '魔幻'];
 
 const CHAPTER_RE = /第[一二三四五六七八九十百千万\d]+章/g;
 
@@ -124,6 +127,13 @@ export default function App() {
   const [phase, setPhase] = useState<Phase>('idle');
   const [text, setText] = useState('');
   const [genre, setGenre] = useState('叙事');
+  const [genres, setGenres] = useState<GenreItem[]>([]);
+  const [showGenreModal, setShowGenreModal] = useState(false);
+  const [editGenreIndex, setEditGenreIndex] = useState<number | null>(null);
+  const [editGenreName, setEditGenreName] = useState('');
+  const [editGenreGuidance, setEditGenreGuidance] = useState('');
+  const [editGenreKeywords, setEditGenreKeywords] = useState('');
+  const [genreError, setGenreError] = useState('');
   const [taskId, setTaskId] = useState<string | null>(null);
   const [progress, setProgress] = useState<ProgressEvent | null>(null);
   const [result, setResult] = useState<ConversionResult | null>(null);
@@ -179,6 +189,65 @@ export default function App() {
     setError(null);
   }, []);
 
+  const loadGenres = useCallback(async () => {
+    try {
+      const list = await fetchGenres();
+      setGenres(list);
+      if (list.length > 0 && !list.find((g) => g.name === genre)) {
+        setGenre(list[0].name);
+      }
+    } catch {
+      // keep defaults
+    }
+  }, []);
+
+  const handleSaveGenre = useCallback(async () => {
+    setGenreError('');
+    if (!editGenreName.trim()) {
+      setGenreError('类型名称不能为空');
+      return;
+    }
+    const item: GenreItem = {
+      name: editGenreName.trim(),
+      guidance: editGenreGuidance.trim(),
+      keywords: editGenreKeywords.split(/[,，]/).map((k) => k.trim()).filter(Boolean),
+    };
+    try {
+      if (editGenreIndex !== null) {
+        await updateGenre(editGenreIndex, item);
+      } else {
+        await addGenre(item);
+      }
+      await loadGenres();
+      setShowGenreModal(false);
+    } catch (err: unknown) {
+      setGenreError(err instanceof Error ? err.message : '保存失败');
+    }
+  }, [editGenreName, editGenreGuidance, editGenreKeywords, editGenreIndex, loadGenres]);
+
+  const handleDeleteGenre = useCallback(async (index: number) => {
+    setGenreError('');
+    try {
+      await deleteGenre(index);
+      await loadGenres();
+    } catch (err: unknown) {
+      setGenreError(err instanceof Error ? err.message : '删除失败');
+    }
+  }, [loadGenres]);
+
+  const handleEditGenre = useCallback((index: number) => {
+    const g = genres[index];
+    setEditGenreIndex(index);
+    setEditGenreName(g.name);
+    setEditGenreGuidance(g.guidance);
+    setEditGenreKeywords(g.keywords.join(', '));
+    setGenreError('');
+  }, [genres]);
+
+  useEffect(() => {
+    loadGenres();
+  }, []);
+
   useEffect(() => {
     if (msgRef.current) {
       msgRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -210,10 +279,26 @@ export default function App() {
                 className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm bg-white
                            focus:outline-none focus:ring-2 focus:ring-indigo-400 disabled:opacity-50"
               >
-                {GENRES.map((g) => (
-                  <option key={g} value={g}>{g}</option>
+                {genres.map((g) => (
+                  <option key={g.name} value={g.name}>{g.name}</option>
                 ))}
               </select>
+              <button
+                type="button"
+                onClick={() => {
+                  setGenreError('');
+                  setEditGenreIndex(null);
+                  setEditGenreName('');
+                  setEditGenreGuidance('');
+                  setEditGenreKeywords('');
+                  setShowGenreModal(true);
+                }}
+                disabled={phase === 'converting'}
+                className="px-2 py-1.5 text-xs text-indigo-600 border border-indigo-200 rounded-lg
+                           hover:bg-indigo-50 disabled:opacity-50 transition-colors"
+              >
+                管理类型
+              </button>
             </div>
           </div>
           <textarea
@@ -444,6 +529,126 @@ export default function App() {
             {activeTab === 'structured' && (
               <StructuredView yaml={result.yaml} />
             )}
+          </section>
+        )}
+
+        {/* Genre Management Modal */}
+        {showGenreModal && (
+          <section className="bg-white rounded-xl shadow-lg border border-slate-300 p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-slate-700">管理小说类型</h2>
+              <button
+                onClick={() => setShowGenreModal(false)}
+                className="text-slate-400 hover:text-slate-600 text-xl leading-none"
+              >
+                ✕
+              </button>
+            </div>
+
+            {genreError && (
+              <div className="mb-3 p-2 bg-red-50 border border-red-200 rounded text-sm text-red-600">
+                {genreError}
+              </div>
+            )}
+
+            {/* Existing genres table */}
+            <div className="mb-4 max-h-48 overflow-auto border border-slate-200 rounded-lg">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 sticky top-0">
+                  <tr>
+                    <th className="text-left px-3 py-2 text-slate-500 font-medium">名称</th>
+                    <th className="text-left px-3 py-2 text-slate-500 font-medium">描述</th>
+                    <th className="text-left px-3 py-2 text-slate-500 font-medium">关键词</th>
+                    <th className="text-center px-3 py-2 text-slate-500 font-medium w-20">操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {genres.map((g, i) => (
+                    <tr key={i} className="border-t border-slate-100 hover:bg-slate-50">
+                      <td className="px-3 py-2 font-medium text-slate-700">{g.name}</td>
+                      <td className="px-3 py-2 text-slate-500 max-w-[200px] truncate">{g.guidance}</td>
+                      <td className="px-3 py-2 text-slate-400 text-xs">{g.keywords?.join(', ') || '-'}</td>
+                      <td className="px-3 py-2 text-center">
+                        <button
+                          onClick={() => handleEditGenre(i)}
+                          className="text-indigo-500 hover:text-indigo-700 text-xs mr-1"
+                        >
+                          编辑
+                        </button>
+                        <button
+                          onClick={() => handleDeleteGenre(i)}
+                          className="text-red-400 hover:text-red-600 text-xs"
+                        >
+                          删除
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Add / Edit form */}
+            <div className="border-t border-slate-200 pt-4 space-y-3">
+              <h3 className="text-sm font-semibold text-slate-600">
+                {editGenreIndex !== null ? `编辑: ${editGenreName}` : '新增类型'}
+              </h3>
+              <div>
+                <label className="text-xs text-slate-500">名称</label>
+                <input
+                  value={editGenreName}
+                  onChange={(e) => setEditGenreName(e.target.value)}
+                  placeholder="如: 悬疑"
+                  className="w-full mt-1 px-3 py-1.5 border border-slate-300 rounded-lg text-sm
+                             focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">AI 指引描述</label>
+                <textarea
+                  value={editGenreGuidance}
+                  onChange={(e) => setEditGenreGuidance(e.target.value)}
+                  placeholder="告诉 AI 这类小说的特点和分析重点..."
+                  rows={2}
+                  className="w-full mt-1 px-3 py-1.5 border border-slate-300 rounded-lg text-sm
+                             focus:outline-none focus:ring-2 focus:ring-indigo-400 resize-y"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">主角关键词</label>
+                <input
+                  value={editGenreKeywords}
+                  onChange={(e) => setEditGenreKeywords(e.target.value)}
+                  placeholder="用逗号分隔, 如: 侠, 掌门, 江湖"
+                  className="w-full mt-1 px-3 py-1.5 border border-slate-300 rounded-lg text-sm
+                             focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                />
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleSaveGenre}
+                  className="px-4 py-1.5 bg-indigo-600 text-white text-sm rounded-lg
+                             hover:bg-indigo-700 transition-colors"
+                >
+                  {editGenreIndex !== null ? '保存修改' : '添加类型'}
+                </button>
+                {editGenreIndex !== null && (
+                  <button
+                    onClick={() => {
+                      setEditGenreIndex(null);
+                      setEditGenreName('');
+                      setEditGenreGuidance('');
+                      setEditGenreKeywords('');
+                      setGenreError('');
+                    }}
+                    className="px-4 py-1.5 text-sm text-slate-500 border border-slate-300 rounded-lg
+                               hover:bg-slate-50 transition-colors"
+                  >
+                    取消编辑
+                  </button>
+                )}
+              </div>
+            </div>
           </section>
         )}
       </main>
