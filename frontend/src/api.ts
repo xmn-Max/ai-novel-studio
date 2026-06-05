@@ -110,11 +110,11 @@ export function logout() {
   localStorage.removeItem('auth_token');
 }
 
-export async function startConversion(text: string, genre: string): Promise<{ task_id: string }> {
+export async function startConversion(text: string, genre: string, title: string): Promise<{ task_id: string }> {
   const res = await fetch(`${API_BASE}/convert`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ text, genre }),
+    body: JSON.stringify({ text, genre, title }),
   });
 
   if (!res.ok) {
@@ -218,5 +218,18 @@ export async function fetchResult(taskId: string): Promise<ConversionResult> {
     throw new Error(err.detail || '获取结果失败');
   }
 
+  return res.json();
+}
+
+export async function regenerate(taskId: string, hints: string): Promise<ConversionResult> {
+  const res = await fetch(`${API_BASE}/convert/${taskId}/regenerate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ hints }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || '重新生成失败');
+  }
   return res.json();
 }

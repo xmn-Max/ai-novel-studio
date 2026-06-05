@@ -48,11 +48,12 @@ def _load_genre_keywords(genre_name: str) -> list[str]:
 
 
 class Pipeline:
-    def __init__(self, api_key: str, genre: str = "叙事") -> None:
+    def __init__(self, api_key: str, genre: str = "叙事", title: str = "") -> None:
         self.client = AsyncOpenAI(api_key=api_key, base_url="https://api.deepseek.com")
         self.model = "deepseek-chat"
         self.genre = genre
         self.genre_guidance = _load_genre_guidance(genre)
+        self.title = title
 
     async def run(self, text: str, progress_callback: Callable) -> dict[str, Any]:
         await progress_callback(1, TOTAL_STEPS, "文本清洗", "正在清洗文本格式...")
@@ -83,13 +84,6 @@ class Pipeline:
 
         await progress_callback(6, TOTAL_STEPS, "主角验证", "正在验证主角一致性...")
         validation = self._validate_main_character(script_scenes, characters, chapters)
-        if validation.count < 2:
-            alt_validation = self._validate_main_character(
-                script_scenes, characters, chapters, retry=True
-            )
-            alt_validation.retried = True
-            if alt_validation.count >= 2:
-                validation = alt_validation
 
         await progress_callback(7, TOTAL_STEPS, "Schema校验", "正在校验剧本结构...")
         schema_check, script_scenes = self._validate_schema(script_scenes, characters)
@@ -99,32 +93,16 @@ class Pipeline:
                 schema_check.passed = True
                 schema_check.warnings.append("自动修复后仍存在结构问题，请手动检查")
 
-        yaml_str = self._assemble_yaml(script_scenes, characters, chapters, validation, schema_check)
-        character_names = [c.get("name", "") for c in characters]
+        yaml_str, output = self._build_output(script_scenes, characters, chapters, validation, schema_check)
 
-        return {
-            "yaml": yaml_str,
-            "meta": {
-                "title": chapters[0]["title"] if chapters else "未命名",
-                "genre": self.genre,
-                "chapter_count": len(chapters),
-                "scene_count": len(script_scenes),
-                "character_count": len(characters),
-                "characters": character_names,
-                "character_details": characters,
-                "validation": {
-                    "main_character": validation.main_character,
-                    "count": validation.count,
-                    "status": validation.status,
-                    "retried": validation.retried,
-                },
-                "schema_validation": {
-                    "passed": schema_check.passed,
-                    "warnings": schema_check.warnings,
-                    "errors": schema_check.errors,
-                },
-            },
+        output["_intermediate"] = {
+            "script_scenes": script_scenes,
+            "characters": characters,
+            "chapters": chapters,
+            "cleaned_text": cleaned_text,
         }
+
+        return output
 
     def _clean_text(self, text: str) -> str:
         text = re.sub(r"[ \t]+", " ", text)
@@ -187,6 +165,7 @@ class Pipeline:
         characters: list[dict[str, Any]],
         chapters: list[dict[str, Any]],
         retry: bool = False,
+        hints: str = "",
     ) -> ValidationResult:
         count = 0
 
@@ -228,17 +207,18 @@ class Pipeline:
         if not candidate:
             candidate = sorted_chars[0] if sorted_chars else ""
 
-        # Step 2: per-chapter frequency check
+        # Step 2: per-chapter frequency check (include hints if provided)
         chapter_passes = 0
         for ch in chapters:
             ch_text = ch.get("content", "")
-            freq = ch_text.count(candidate) if candidate else 0
+            search_text = ch_text + ("\n" + hints if hints else "")
+            freq = search_text.count(candidate) if candidate else 0
             if freq >= 5:
                 chapter_passes += 1
         if chapter_passes == len(chapters) and len(chapters) > 0:
             count += 1
 
-        # Step 3: task consistency
+        # Step 3: task consistency (include hints in search)
         if candidate:
             main_actions = []
             for s in script_scenes:
@@ -248,7 +228,8 @@ class Pipeline:
                 matched = 0
                 for action in main_actions[:10]:
                     for ch in chapters:
-                        if action[:6] in ch.get("content", ""):
+                        search_text = ch.get("content", "") + ("\n" + hints if hints else "")
+                        if action[:6] in search_text:
                             matched += 1
                             break
                 if matched >= len(main_actions[:10]) / 2:
@@ -341,12 +322,10 @@ class Pipeline:
 
         output: dict[str, Any] = {
             "meta": {
-                "title": chapters[0]["title"] if chapters else "未命名",
-                "genre": self.genre,
+                "title": self.title or (chapters[0]["title"] if chapters else "未命名"),
                 "source_chapters": len(chapters),
                 "total_scenes": len(scenes_out),
                 "characters": character_names,
-                "character_details": characters,
                 "generated_at": datetime.now().isoformat(),
                 "validation": {
                     "main_character": validation.main_character,
@@ -364,6 +343,41 @@ class Pipeline:
         }
 
         return yaml.dump(output, allow_unicode=True, default_flow_style=False, sort_keys=False)
+
+    def _build_output(
+        self,
+        script_scenes: list[dict[str, Any]],
+        characters: list[dict[str, Any]],
+        chapters: list[dict[str, Any]],
+        validation: ValidationResult,
+        schema_check: SchemaValidation,
+    ) -> tuple[str, dict[str, Any]]:
+        yaml_str = self._assemble_yaml(script_scenes, characters, chapters, validation, schema_check)
+        character_names = [c.get("name", "") for c in characters]
+        output: dict[str, Any] = {
+            "yaml": yaml_str,
+            "meta": {
+                "title": self.title or (chapters[0]["title"] if chapters else "未命名"),
+                "genre": self.genre,
+                "chapter_count": len(chapters),
+                "scene_count": len(script_scenes),
+                "character_count": len(characters),
+                "characters": character_names,
+                "character_details": characters,
+                "validation": {
+                    "main_character": validation.main_character,
+                    "count": validation.count,
+                    "status": validation.status,
+                    "retried": validation.retried,
+                },
+                "schema_validation": {
+                    "passed": schema_check.passed,
+                    "warnings": schema_check.warnings,
+                    "errors": schema_check.errors,
+                },
+            },
+        }
+        return yaml_str, output
 
     async def _call_llm(self, system_prompt: str, user_content: str) -> str:
         last_error: str = ""

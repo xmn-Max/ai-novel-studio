@@ -55,6 +55,7 @@ class Meta(BaseModel):
 class ConvertRequest(BaseModel):
     text: str
     genre: str = "叙事"
+    title: str = ""
 
 
 class ConvertResponse(BaseModel):

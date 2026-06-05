@@ -11,6 +11,7 @@ import {
   login,
   fetchCurrentUser,
   logout,
+  regenerate,
   ProgressEvent,
   ConversionResult,
   GenreItem,
@@ -130,6 +131,7 @@ function downloadYaml(yaml: string) {
 export default function App() {
   const [phase, setPhase] = useState<Phase>('idle');
   const [text, setText] = useState('');
+  const [title, setTitle] = useState('');
   const [genre, setGenre] = useState('叙事');
   const [genres, setGenres] = useState<GenreItem[]>([]);
   const [showGenreModal, setShowGenreModal] = useState(false);
@@ -153,6 +155,10 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'yaml' | 'structured'>('yaml');
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [hints, setHints] = useState('');
+  const [regenerating, setRegenerating] = useState(false);
+  const [hintsError, setHintsError] = useState('');
+  const [hintsSkipped, setHintsSkipped] = useState(false);
   const msgRef = useRef<HTMLDivElement>(null);
 
   const chapterCount = countChapters(text);
@@ -185,7 +191,7 @@ export default function App() {
     setProgress(null);
     setResult(null);
     try {
-      const { task_id } = await startConversion(text, genre);
+      const { task_id } = await startConversion(text, genre, title);
       setTaskId(task_id);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : '启动失败');
@@ -256,6 +262,28 @@ export default function App() {
     },
     [authMode, handleLogin, handleRegister]
   );
+
+  const handleRegenerate = useCallback(async () => {
+    if (!taskId || !hints.trim()) {
+      setHintsError('请输入补充信息');
+      return;
+    }
+    setRegenerating(true);
+    setHintsError('');
+    try {
+      const updated = await regenerate(taskId, hints.trim());
+      setResult(updated);
+      setHints('');
+    } catch (err: unknown) {
+      setHintsError(err instanceof Error ? err.message : '重新生成失败');
+    }
+    setRegenerating(false);
+  }, [taskId, hints]);
+
+  const handleSkipRevalidate = useCallback(() => {
+    setHints('');
+    setHintsSkipped(true);
+  }, []);
 
   const loadGenres = useCallback(async () => {
     try {
@@ -466,6 +494,18 @@ export default function App() {
               </button>
             </div>
           </div>
+          <div className="mb-3">
+            <label className="text-sm text-slate-500 mr-2">剧本标题：</label>
+            <input
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="输入剧本标题（留空则使用第一章标题）"
+              disabled={phase === 'converting'}
+              className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm w-72
+                         focus:outline-none focus:ring-2 focus:ring-indigo-400 disabled:opacity-50"
+            />
+          </div>
           <textarea
             className="w-full h-64 p-4 border border-slate-300 rounded-lg resize-y text-sm leading-relaxed
                        focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent
@@ -622,14 +662,51 @@ export default function App() {
                   ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
                   : 'bg-amber-50 border-amber-200 text-amber-700'
               }`}>
-                <span className="font-semibold">主角验证</span>
-                <span className="mx-2">|</span>
-                主角: {result.meta.validation.main_character || '未识别'}
-                <span className="mx-2">|</span>
-                评分: {result.meta.validation.count}/2
-                <span className="mx-2">|</span>
-                {result.meta.validation.status}
-                {result.meta.validation.retried && <span className="ml-1">(已重试)</span>}
+                <div className="flex items-center flex-wrap gap-x-3 gap-y-1">
+                  <span className="font-semibold">主角验证</span>
+                  <span>主角: {result.meta.validation.main_character || '未识别'}</span>
+                  <span>评分: {result.meta.validation.count}/2</span>
+                  <span>{result.meta.validation.status}</span>
+                  {result.meta.validation.retried && <span className="text-xs">(已重试)</span>}
+                </div>
+
+                {result.meta.validation.count < 2 && !result.meta.validation.retried && !hintsSkipped && (
+                  <div className="mt-3 pt-3 border-t border-amber-200">
+                    <p className="text-xs mb-2">
+                      主角验证未达标，是否添加补充信息帮助 AI 重新生成剧本？
+                    </p>
+                    <textarea
+                      value={hints}
+                      onChange={(e) => setHints(e.target.value)}
+                      placeholder="例如：主角是林晓，是一名女程序员；故事主线是悬疑调查；场景应更偏重内心独白..."
+                      rows={2}
+                      className="w-full px-3 py-1.5 border border-amber-300 rounded-lg text-xs
+                                 focus:outline-none focus:ring-2 focus:ring-amber-400 resize-y"
+                      disabled={regenerating}
+                    />
+                    {hintsError && (
+                      <p className="text-xs text-red-500 mt-1">{hintsError}</p>
+                    )}
+                    <div className="flex gap-2 mt-2">
+                      <button
+                        onClick={handleRegenerate}
+                        disabled={regenerating || !hints.trim()}
+                        className="px-3 py-1 text-xs bg-amber-600 text-white rounded-md
+                                   hover:bg-amber-700 disabled:opacity-50 transition-colors"
+                      >
+                        {regenerating ? '生成中...' : '提交信息重新生成'}
+                      </button>
+                      <button
+                        onClick={handleSkipRevalidate}
+                        disabled={regenerating}
+                        className="px-3 py-1 text-xs text-amber-600 border border-amber-300 rounded-md
+                                   hover:bg-amber-50 disabled:opacity-50 transition-colors"
+                      >
+                        跳过，直接使用当前结果
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 

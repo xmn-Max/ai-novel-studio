@@ -52,14 +52,14 @@ def _merged_genres(username: str) -> list[dict[str, Any]]:
     return result
 
 
-def _get_pipeline(genre: str = "叙事") -> Pipeline:
+def _get_pipeline(genre: str = "叙事", title: str = "") -> Pipeline:
     if not API_KEY:
         raise RuntimeError("DEEPSEEK_API_KEY 环境变量未设置")
-    return Pipeline(api_key=API_KEY, genre=genre)
+    return Pipeline(api_key=API_KEY, genre=genre, title=title)
 
 
-async def _run_pipeline(task_id: str, text: str, genre: str) -> None:
-    pipeline = _get_pipeline(genre)
+async def _run_pipeline(task_id: str, text: str, genre: str, title: str) -> None:
+    pipeline = _get_pipeline(genre, title)
     tasks[task_id]["status"] = "processing"
 
     async def progress_callback(step: int, total: int, step_name: str, message: str) -> None:
@@ -73,6 +73,12 @@ async def _run_pipeline(task_id: str, text: str, genre: str) -> None:
     try:
         result = await pipeline.run(text, progress_callback)
         tasks[task_id]["status"] = "completed"
+        intermediate = result.pop("_intermediate", None)
+        intermediate["original_text"] = text
+        intermediate["genre"] = genre
+        intermediate["title"] = title
+        tasks[task_id]["_intermediate"] = intermediate
+        tasks[task_id]["_pipeline"] = pipeline
         tasks[task_id]["result"] = result
     except Exception as e:
         tasks[task_id]["status"] = "failed"
@@ -218,7 +224,7 @@ async def convert(request: ConvertRequest, user: dict = Depends(_require_auth)) 
         "result": None,
     }
 
-    asyncio.create_task(_run_pipeline(task_id, text, genre))
+    asyncio.create_task(_run_pipeline(task_id, text, genre, request.title.strip()))
     return ConvertResponse(task_id=task_id)
 
 
@@ -274,3 +280,40 @@ async def result(task_id: str, user: dict = Depends(_require_auth)):
         raise HTTPException(status_code=500, detail=f"任务失败: {task.get('error', '未知错误')}")
 
     return task["result"]
+
+
+class RegenerateRequest(BaseModel):
+    hints: str
+
+
+@app.post("/api/convert/{task_id}/regenerate")
+async def regenerate(task_id: str, req: RegenerateRequest, user: dict = Depends(_require_auth)):
+    if task_id not in tasks:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    task = tasks[task_id]
+    if task["status"] != "completed":
+        raise HTTPException(status_code=400, detail="任务尚未完成，无法重新生成")
+
+    intermediate = task.get("_intermediate")
+    if not intermediate or not intermediate.get("original_text"):
+        raise HTTPException(status_code=400, detail="无法重新生成，请重新转换")
+
+    if not req.hints.strip():
+        raise HTTPException(status_code=400, detail="请输入补充信息")
+
+    original_text = intermediate["original_text"]
+    genre = intermediate.get("genre", "叙事")
+    title = intermediate.get("title", "")
+    enriched_text = original_text + "\n\n【用户补充信息】\n" + req.hints.strip()
+
+    tasks[task_id]["status"] = "regenerating"
+    tasks[task_id]["progress"] = {
+        "step": 0,
+        "total": 7,
+        "step_name": "初始化",
+        "message": "正在根据补充信息重新生成...",
+    }
+
+    await _run_pipeline(task_id, enriched_text, genre, title)
+    return tasks[task_id].get("result", {})
