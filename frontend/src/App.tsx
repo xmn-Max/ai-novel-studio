@@ -1,0 +1,459 @@
+import { useState, useCallback, useEffect, useRef } from 'react';
+import {
+  startConversion,
+  subscribeProgress,
+  fetchResult,
+  ProgressEvent,
+  ConversionResult,
+} from './api';
+
+type Phase = 'idle' | 'converting' | 'done';
+
+const STEP_LABELS = ['章节检测', '角色提取', '场景切分', '剧本转换', '组装输出'];
+
+const CHAPTER_RE = /第[一二三四五六七八九十百千万\d]+章/g;
+
+function countChapters(text: string): number {
+  const matches = text.match(CHAPTER_RE);
+  return matches ? matches.length : 0;
+}
+
+interface ChapterData {
+  name: string;
+  scenes: SceneData[];
+}
+
+interface SceneData {
+  heading: string;
+  actions: string[];
+  dialogues: DialogueData[];
+}
+
+interface DialogueData {
+  character: string;
+  line: string;
+}
+
+function parseYamlToStructure(yaml: string): ChapterData[] {
+  const chapters: ChapterData[] = [];
+  const lines = yaml.split('\n');
+  let currentChapter: ChapterData | null = null;
+  let currentScene: SceneData | null = null;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trimEnd();
+    if (!line) continue;
+
+    const indent = rawLine.length - rawLine.trimStart().length;
+
+    if (indent === 0 && line.startsWith('- chapter:')) {
+      const name = line.slice('- chapter:'.length).trim();
+      currentChapter = { name, scenes: [] };
+      currentScene = null;
+      chapters.push(currentChapter);
+    } else if (indent === 2 && line.startsWith('- scene:')) {
+      const heading = line.slice('- scene:'.length).trim();
+      currentScene = { heading, actions: [], dialogues: [] };
+      if (currentChapter) {
+        currentChapter.scenes.push(currentScene);
+      }
+    } else if (indent === 4 && line.startsWith('- ') && currentScene) {
+      const body = line.slice(2).trim();
+      if (body.startsWith('[') && body.endsWith(']')) {
+        currentScene.actions.push(body.slice(1, -1).trim());
+      }
+    } else if (indent === 6 && line.startsWith('- ') && currentScene) {
+      const body = line.slice(2).trim();
+      const match = body.match(/^\[(.*?)\]\s*(.+)/);
+      if (match) {
+        currentScene.dialogues.push({
+          character: match[1].trim(),
+          line: match[2].trim(),
+        });
+      }
+    }
+  }
+
+  return chapters;
+}
+
+function highlightYaml(yaml: string) {
+  return yaml.split('\n').map((line, i) => {
+    const trimmed = line.trimStart();
+    let cls = 'text-slate-500';
+    if (trimmed.startsWith('#')) {
+      cls = 'text-slate-400 italic';
+    } else if (trimmed.startsWith('- ') || trimmed.startsWith('  - ')) {
+      cls = 'text-indigo-700';
+    } else if (trimmed.includes(':')) {
+      const keyPart = trimmed.split(':')[0];
+      if (keyPart.match(/^[\w\u4e00-\u9fff]+$/)) {
+        cls = 'text-emerald-700';
+      }
+    }
+    return (
+      <div key={i} className="flex">
+        <span className="select-none text-slate-300 w-10 text-right pr-3 shrink-0 text-xs leading-6">
+          {i + 1}
+        </span>
+        <span className={cls + ' whitespace-pre-wrap break-all leading-6'}>{line || ' '}</span>
+      </div>
+    );
+  });
+}
+
+function copyToClipboard(text: string) {
+  navigator.clipboard.writeText(text).catch(() => {});
+}
+
+function downloadYaml(yaml: string) {
+  const blob = new Blob([yaml], { type: 'application/x-yaml' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'script.yaml';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+export default function App() {
+  const [phase, setPhase] = useState<Phase>('idle');
+  const [text, setText] = useState('');
+  const [taskId, setTaskId] = useState<string | null>(null);
+  const [progress, setProgress] = useState<ProgressEvent | null>(null);
+  const [result, setResult] = useState<ConversionResult | null>(null);
+  const [activeTab, setActiveTab] = useState<'yaml' | 'structured'>('yaml');
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const msgRef = useRef<HTMLDivElement>(null);
+
+  const chapterCount = countChapters(text);
+  const canConvert = text.length > 100 && chapterCount >= 3;
+
+  useEffect(() => {
+    if (phase === 'converting' && taskId) {
+      const unsub = subscribeProgress(
+        taskId,
+        (e) => setProgress(e),
+        async () => {
+          try {
+            const res = await fetchResult(taskId);
+            setResult(res);
+            setPhase('done');
+          } catch (err: unknown) {
+            setError(err instanceof Error ? err.message : '获取结果失败');
+          }
+        },
+        (err) => setError(err),
+      );
+      return unsub;
+    }
+  }, [phase, taskId]);
+
+  const handleConvert = useCallback(async () => {
+    if (!canConvert) return;
+    setError(null);
+    setPhase('converting');
+    setProgress(null);
+    setResult(null);
+    try {
+      const { task_id } = await startConversion(text);
+      setTaskId(task_id);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : '启动失败');
+      setPhase('idle');
+    }
+  }, [text, canConvert]);
+
+  const handleReset = useCallback(() => {
+    setPhase('idle');
+    setText('');
+    setTaskId(null);
+    setProgress(null);
+    setResult(null);
+    setError(null);
+  }, []);
+
+  useEffect(() => {
+    if (msgRef.current) {
+      msgRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }, [progress?.message]);
+
+  return (
+    <div className="min-h-screen py-6 px-4">
+      <header className="text-center mb-8">
+        <h1 className="text-2xl font-bold text-slate-800 tracking-wide">
+          AI 剧本创作助手
+        </h1>
+        <p className="text-slate-500 text-sm mt-1">
+          将小说章节一键转换为标准剧本格式
+        </p>
+      </header>
+
+      <main className="max-w-4xl mx-auto space-y-6">
+        {/* Input Section */}
+        <section className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+          <h2 className="text-lg font-semibold text-slate-700 mb-3">输入小说文本</h2>
+          <textarea
+            className="w-full h-64 p-4 border border-slate-300 rounded-lg resize-y text-sm leading-relaxed
+                       focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent
+                       placeholder:text-slate-400 disabled:opacity-50"
+            placeholder={"请粘贴小说文本（至少3个章节，通过\"第X章\"标记章节）..."}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            disabled={phase === 'converting'}
+          />
+          <div className="flex items-center justify-between mt-3">
+            <span className={`text-sm font-medium ${chapterCount >= 3 ? 'text-emerald-600' : 'text-red-500'}`}>
+              检测到 {chapterCount} 个章节{chapterCount < 3 ? '（至少需要3个章节）' : ''}
+            </span>
+            <button
+              onClick={handleConvert}
+              disabled={!canConvert || phase === 'converting'}
+              className="px-6 py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-lg
+                         hover:bg-indigo-700 active:bg-indigo-800
+                         disabled:bg-slate-300 disabled:text-slate-500 disabled:cursor-not-allowed
+                         transition-colors"
+            >
+              开始转换
+            </button>
+          </div>
+        </section>
+
+        {/* Error Banner */}
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
+            <span className="text-red-500 shrink-0 mt-0.5">⚠</span>
+            <div className="flex-1">
+              <p className="text-red-700 text-sm">{error}</p>
+            </div>
+            <button
+              onClick={() => setError(null)}
+              className="text-red-400 hover:text-red-600 shrink-0"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
+        {/* Progress Section */}
+        {phase === 'converting' && progress && (
+          <section className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+            <h2 className="text-lg font-semibold text-slate-700 mb-4">转换进度</h2>
+
+            <div className="flex items-center justify-between mb-2">
+              {STEP_LABELS.map((label, i) => {
+                const stepNum = i + 1;
+                const isCompleted = stepNum < progress.step;
+                const isActive = stepNum === progress.step;
+                return (
+                  <div key={i} className="flex flex-col items-center flex-1">
+                    <div className="flex items-center w-full">
+                      {i > 0 && (
+                        <div
+                          className={`flex-1 h-0.5 -mr-2 -ml-2 ${
+                            isCompleted || isActive ? 'bg-indigo-500' : 'bg-slate-200'
+                          }`}
+                        />
+                      )}
+                      <div
+                        className={`relative z-10 w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0
+                          ${isCompleted ? 'bg-indigo-600 text-white' : ''}
+                          ${isActive ? 'bg-indigo-500 text-white ring-4 ring-indigo-100' : ''}
+                          ${!isCompleted && !isActive ? 'bg-slate-100 text-slate-400' : ''}
+                        `}
+                      >
+                        {isCompleted ? '✓' : stepNum}
+                      </div>
+                      {i < STEP_LABELS.length - 1 && (
+                        <div
+                          className={`flex-1 h-0.5 -mr-2 -ml-2 ${
+                            isCompleted ? 'bg-indigo-500' : 'bg-slate-200'
+                          }`}
+                        />
+                      )}
+                    </div>
+                    <span
+                      className={`text-xs mt-1.5 text-center ${
+                        isActive ? 'text-indigo-600 font-semibold' : ''
+                      } ${isCompleted ? 'text-indigo-500' : ''} ${
+                        !isCompleted && !isActive ? 'text-slate-400' : ''
+                      }`}
+                    >
+                      {label}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="mt-5 text-center" ref={msgRef}>
+              <p className="text-sm text-slate-600">
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse-dot mr-2 align-middle" />
+                {progress.message}
+              </p>
+            </div>
+
+            <div className="mt-4 w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+              <div
+                className="h-full bg-indigo-500 rounded-full transition-all duration-500 ease-out"
+                style={{ width: `${(progress.step / progress.total) * 100}%` }}
+              />
+            </div>
+          </section>
+        )}
+
+        {/* Result Section */}
+        {phase === 'done' && result && (
+          <section className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-slate-700">转换结果</h2>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleReset}
+                  className="px-3 py-1.5 text-sm text-slate-500 hover:text-slate-700 border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
+                >
+                  重新开始
+                </button>
+                <button
+                  onClick={() => downloadYaml(result.yaml)}
+                  className="px-4 py-1.5 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 transition-colors"
+                >
+                  下载 YAML
+                </button>
+              </div>
+            </div>
+
+            {/* Meta info */}
+            <div className="flex flex-wrap gap-3 mb-4">
+              <span className="inline-flex items-center gap-1 text-xs bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full">
+                📖 {result.meta.title}
+              </span>
+              <span className="inline-flex items-center gap-1 text-xs bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full">
+                章节: {result.meta.chapter_count}
+              </span>
+              <span className="inline-flex items-center gap-1 text-xs bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full">
+                场景: {result.meta.scene_count}
+              </span>
+              <span className="inline-flex items-center gap-1 text-xs bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full">
+                角色: {result.meta.character_count}
+              </span>
+            </div>
+
+            {/* Tabs */}
+            <div className="flex border-b border-slate-200 mb-3">
+              <button
+                onClick={() => setActiveTab('yaml')}
+                className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                  activeTab === 'yaml'
+                    ? 'border-indigo-500 text-indigo-600'
+                    : 'border-transparent text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                YAML 预览
+              </button>
+              <button
+                onClick={() => setActiveTab('structured')}
+                className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                  activeTab === 'structured'
+                    ? 'border-indigo-500 text-indigo-600'
+                    : 'border-transparent text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                结构化视图
+              </button>
+            </div>
+
+            {/* Tab Content */}
+            {activeTab === 'yaml' && (
+              <div className="relative">
+                <button
+                  onClick={() => {
+                    copyToClipboard(result.yaml);
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 2000);
+                  }}
+                  className="absolute top-2 right-2 px-3 py-1 text-xs bg-slate-700 text-white rounded-md
+                             hover:bg-slate-800 transition-colors z-10"
+                >
+                  {copied ? '已复制!' : '复制'}
+                </button>
+                <pre className="bg-slate-900 rounded-lg p-4 max-h-[500px] overflow-auto text-xs leading-relaxed font-mono">
+                  {highlightYaml(result.yaml)}
+                </pre>
+              </div>
+            )}
+
+            {activeTab === 'structured' && (
+              <StructuredView yaml={result.yaml} />
+            )}
+          </section>
+        )}
+      </main>
+    </div>
+  );
+}
+
+function StructuredView({ yaml }: { yaml: string }) {
+  const data = parseYamlToStructure(yaml);
+
+  if (data.length === 0) {
+    return <p className="text-slate-400 text-sm py-8 text-center">暂无可解析的结构化数据</p>;
+  }
+
+  return (
+    <div className="space-y-4 max-h-[600px] overflow-auto pr-1">
+      {data.map((chapter, ci) => (
+        <details key={ci} className="group" open>
+          <summary className="cursor-pointer text-base font-semibold text-indigo-700 bg-indigo-50 px-3 py-2 rounded-lg hover:bg-indigo-100 transition-colors">
+            {chapter.name || `第${ci + 1}章`}
+          </summary>
+          <div className="mt-2 space-y-3 pl-2">
+            {chapter.scenes.map((scene, si) => (
+              <div key={si} className="bg-slate-50 border border-slate-200 rounded-lg p-4">
+                <h3 className="text-sm font-bold text-slate-800 mb-2">
+                  🎬 {scene.heading || `场景 ${si + 1}`}
+                </h3>
+
+                {scene.actions.length > 0 && (
+                  <div className="mb-3 space-y-1">
+                    {scene.actions.map((a, ai) => (
+                      <p key={ai} className="text-sm text-slate-600 pl-2 border-l-2 border-slate-300">
+                        {a}
+                      </p>
+                    ))}
+                  </div>
+                )}
+
+                {scene.dialogues.length > 0 && (
+                  <div className="space-y-2">
+                    {scene.dialogues.map((d, di) => (
+                      <div
+                        key={di}
+                        className="bg-white border border-indigo-100 rounded-md p-3 shadow-sm"
+                      >
+                        <span className="text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">
+                          {d.character}
+                        </span>
+                        <p className="text-sm text-slate-700 mt-1.5 italic">
+                          &ldquo;{d.line}&rdquo;
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {scene.actions.length === 0 && scene.dialogues.length === 0 && (
+                  <p className="text-xs text-slate-400 italic">暂无内容</p>
+                )}
+              </div>
+            ))}
+          </div>
+        </details>
+      ))}
+    </div>
+  );
+}
