@@ -79,9 +79,9 @@ class Pipeline:
         return chapters
 
     async def _extract_characters(self, text: str) -> list[dict[str, Any]]:
-        prompt = prompts.CHARACTER_EXTRACTION_PROMPT
-        result = await self._call_llm(prompt, text)
-        return self._parse_json_list(result)
+        result = await self._call_llm(prompts.CHARACTER_EXTRACTION_PROMPT, text)
+        data = self._parse_json_object(result)
+        return data.get("characters", []) if data else []
 
     async def _segment_scenes(
         self, chapter_content: str, characters: list[dict[str, Any]]
@@ -91,8 +91,8 @@ class Pipeline:
             characters=json.dumps(char_names, ensure_ascii=False)
         )
         result = await self._call_llm(prompt, chapter_content)
-        scenes = self._parse_json_list(result)
-        return scenes
+        data = self._parse_json_object(result)
+        return data.get("scenes", []) if data else []
 
     async def _convert_scene(
         self, scene_data: dict[str, Any], characters: list[dict[str, Any]]
@@ -161,7 +161,8 @@ class Pipeline:
         return yaml.dump(output, allow_unicode=True, default_flow_style=False, sort_keys=False)
 
     async def _call_llm(self, system_prompt: str, user_content: str) -> str:
-        for attempt in range(2):
+        last_error: str = ""
+        for attempt in range(3):
             try:
                 response = await self.client.chat.completions.create(
                     model=self.model,
@@ -171,51 +172,84 @@ class Pipeline:
                     ],
                     temperature=0.7,
                     max_tokens=4096,
+                    response_format={"type": "json_object"},
                 )
                 content = response.choices[0].message.content
-                return content or ""
+                if not content:
+                    raise RuntimeError("AI 返回空内容，请重试")
+                return content
+            except RuntimeError:
+                raise
             except Exception as e:
-                if attempt == 1:
-                    raise RuntimeError(f"LLM 调用失败: {e}") from e
-                await asyncio.sleep(1)
-        return ""
+                last_error = str(e)
+                err_lower = last_error.lower()
+                if "401" in err_lower or "unauthorized" in err_lower:
+                    raise RuntimeError("API Key 无效或已过期，请检查 DEEPSEEK_API_KEY")
+                if "402" in err_lower or "insufficient" in err_lower or "balance" in err_lower:
+                    raise RuntimeError("DeepSeek 账户余额不足，请充值后重试")
+                if "429" in err_lower or "rate" in err_lower:
+                    raise RuntimeError("请求过于频繁，请稍后重试")
+                if attempt < 2:
+                    await asyncio.sleep(2 * (attempt + 1))
+        raise RuntimeError(f"AI 服务请求失败，请检查网络或稍后重试")
 
     def _parse_json_list(self, raw: str) -> list[dict[str, Any]]:
-        raw = raw.strip()
-        if raw.startswith("```"):
-            raw = re.sub(r"^```\w*\n?", "", raw)
-            raw = re.sub(r"\n?```$", "", raw)
-        try:
-            result = json.loads(raw)
-            if isinstance(result, list):
-                return result
-            if isinstance(result, dict):
-                return [result]
-            return []
-        except json.JSONDecodeError:
-            match = re.search(r"\[.*\]", raw, re.DOTALL)
-            if match:
-                try:
-                    return json.loads(match.group(0))
-                except json.JSONDecodeError:
-                    pass
-            return []
+        result = self._extract_json(raw)
+        if isinstance(result, list):
+            return result
+        if isinstance(result, dict):
+            return [result]
+        return []
 
     def _parse_json_object(self, raw: str) -> dict[str, Any]:
+        result = self._extract_json(raw)
+        if isinstance(result, dict):
+            return result
+        return {}
+
+    def _extract_json(self, raw: str) -> Any:
         raw = raw.strip()
-        if raw.startswith("```"):
-            raw = re.sub(r"^```\w*\n?", "", raw)
-            raw = re.sub(r"\n?```$", "", raw)
-        try:
-            result = json.loads(raw)
-            if isinstance(result, dict):
-                return result
-            return {}
-        except json.JSONDecodeError:
-            match = re.search(r"\{.*\}", raw, re.DOTALL)
-            if match:
-                try:
-                    return json.loads(match.group(0))
-                except json.JSONDecodeError:
-                    pass
-            return {}
+        candidates: list[str] = []
+
+        # Strategy 1: strip markdown fences
+        cleaned = raw
+        if cleaned.startswith("```"):
+            cleaned = re.sub(r"^```[a-z]*\s*\n?", "", cleaned, count=1, flags=re.IGNORECASE)
+            cleaned = re.sub(r"\n?```\s*$", "", cleaned, count=1)
+        candidates.append(cleaned)
+
+        # Strategy 2: find first [ or { and try to parse balanced brackets
+        for start_char, end_char in [("[", "]"), ("{", "}")]:
+            start = raw.find(start_char)
+            if start >= 0:
+                depth = 0
+                in_string = False
+                escape = False
+                for i, ch in enumerate(raw[start:], start):
+                    if escape:
+                        escape = False
+                        continue
+                    if ch == "\\":
+                        escape = True
+                        continue
+                    if ch == '"':
+                        in_string = not in_string
+                        continue
+                    if in_string:
+                        continue
+                    if ch == start_char:
+                        depth += 1
+                    elif ch == end_char:
+                        depth -= 1
+                        if depth == 0:
+                            candidates.append(raw[start : i + 1])
+                            break
+
+        # Try each candidate
+        for cand in candidates:
+            try:
+                return json.loads(cand)
+            except json.JSONDecodeError:
+                continue
+
+        return None
