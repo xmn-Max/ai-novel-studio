@@ -9,7 +9,9 @@ import {
 
 type Phase = 'idle' | 'converting' | 'done';
 
-const STEP_LABELS = ['章节检测', '角色提取', '场景切分', '剧本转换', '组装输出'];
+const STEP_LABELS = ['文本清洗', '章节检测', '角色提取', '场景切分', '剧本转换', '主角验证', 'Schema校验'];
+
+const GENRES = ['武侠', '玄幻', '科幻', '言情', '叙事', '魔幻'];
 
 const CHAPTER_RE = /第[一二三四五六七八九十百千万\d]+章/g;
 
@@ -121,6 +123,7 @@ function downloadYaml(yaml: string) {
 export default function App() {
   const [phase, setPhase] = useState<Phase>('idle');
   const [text, setText] = useState('');
+  const [genre, setGenre] = useState('叙事');
   const [taskId, setTaskId] = useState<string | null>(null);
   const [progress, setProgress] = useState<ProgressEvent | null>(null);
   const [result, setResult] = useState<ConversionResult | null>(null);
@@ -159,7 +162,7 @@ export default function App() {
     setProgress(null);
     setResult(null);
     try {
-      const { task_id } = await startConversion(text);
+      const { task_id } = await startConversion(text, genre);
       setTaskId(task_id);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : '启动失败');
@@ -196,7 +199,23 @@ export default function App() {
       <main className="max-w-4xl mx-auto space-y-6">
         {/* Input Section */}
         <section className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-          <h2 className="text-lg font-semibold text-slate-700 mb-3">输入小说文本</h2>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-lg font-semibold text-slate-700">输入小说文本</h2>
+            <div className="flex items-center gap-2">
+              <label className="text-sm text-slate-500">小说类型：</label>
+              <select
+                value={genre}
+                onChange={(e) => setGenre(e.target.value)}
+                disabled={phase === 'converting'}
+                className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm bg-white
+                           focus:outline-none focus:ring-2 focus:ring-indigo-400 disabled:opacity-50"
+              >
+                {GENRES.map((g) => (
+                  <option key={g} value={g}>{g}</option>
+                ))}
+              </select>
+            </div>
+          </div>
           <textarea
             className="w-full h-64 p-4 border border-slate-300 rounded-lg resize-y text-sm leading-relaxed
                        focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent
@@ -330,7 +349,10 @@ export default function App() {
             {/* Meta info */}
             <div className="flex flex-wrap gap-3 mb-4">
               <span className="inline-flex items-center gap-1 text-xs bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full">
-                📖 {result.meta.title}
+                类型: {result.meta.genre || '叙事'}
+              </span>
+              <span className="inline-flex items-center gap-1 text-xs bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full">
+                {result.meta.title}
               </span>
               <span className="inline-flex items-center gap-1 text-xs bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full">
                 章节: {result.meta.chapter_count}
@@ -342,6 +364,38 @@ export default function App() {
                 角色: {result.meta.character_count}
               </span>
             </div>
+
+            {/* Validation info */}
+            {result.meta.validation && (
+              <div className={`mb-4 p-3 rounded-lg border text-sm ${
+                result.meta.validation.count >= 2
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                  : 'bg-amber-50 border-amber-200 text-amber-700'
+              }`}>
+                <span className="font-semibold">主角验证</span>
+                <span className="mx-2">|</span>
+                主角: {result.meta.validation.main_character || '未识别'}
+                <span className="mx-2">|</span>
+                评分: {result.meta.validation.count}/2
+                <span className="mx-2">|</span>
+                {result.meta.validation.status}
+                {result.meta.validation.retried && <span className="ml-1">(已重试)</span>}
+              </div>
+            )}
+
+            {result.meta.schema_validation && result.meta.schema_validation.warnings.length > 0 && (
+              <div className="mb-4 p-3 rounded-lg border text-sm bg-amber-50 border-amber-200 text-amber-700">
+                <span className="font-semibold">Schema 校验警告</span>
+                <ul className="mt-1 list-disc list-inside">
+                  {result.meta.schema_validation.warnings.slice(0, 5).map((w, i) => (
+                    <li key={i}>{w}</li>
+                  ))}
+                  {result.meta.schema_validation.warnings.length > 5 && (
+                    <li>...等 {result.meta.schema_validation.warnings.length} 条</li>
+                  )}
+                </ul>
+              </div>
+            )}
 
             {/* Tabs */}
             <div className="flex border-b border-slate-200 mb-3">

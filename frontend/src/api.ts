@@ -7,11 +7,34 @@ export interface ProgressEvent {
   error?: string;
 }
 
+export interface ValidationInfo {
+  main_character: string;
+  count: number;
+  status: string;
+  retried: boolean;
+}
+
+export interface SchemaValidationInfo {
+  passed: boolean;
+  warnings: string[];
+  errors: string[];
+}
+
 export interface Meta {
   title: string;
+  genre: string;
   chapter_count: number;
   scene_count: number;
   character_count: number;
+  characters: string[];
+  character_details: Array<{ id: string; name: string; role: string; description: string }>;
+  validation?: ValidationInfo;
+  schema_validation?: SchemaValidationInfo;
+}
+
+export interface ConversionResult {
+  yaml: string;
+  meta: Meta;
 }
 
 export interface ConversionResult {
@@ -21,11 +44,11 @@ export interface ConversionResult {
 
 const API_BASE = '/api';
 
-export async function startConversion(text: string): Promise<{ task_id: string }> {
+export async function startConversion(text: string, genre: string): Promise<{ task_id: string }> {
   const res = await fetch(`${API_BASE}/convert`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, genre }),
   });
 
   if (!res.ok) {

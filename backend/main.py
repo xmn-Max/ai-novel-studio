@@ -28,14 +28,14 @@ tasks: dict[str, dict[str, Any]] = {}
 API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 
 
-def _get_pipeline() -> Pipeline:
+def _get_pipeline(genre: str = "叙事") -> Pipeline:
     if not API_KEY:
         raise RuntimeError("DEEPSEEK_API_KEY 环境变量未设置")
-    return Pipeline(api_key=API_KEY)
+    return Pipeline(api_key=API_KEY, genre=genre)
 
 
-async def _run_pipeline(task_id: str, text: str) -> None:
-    pipeline = _get_pipeline()
+async def _run_pipeline(task_id: str, text: str, genre: str) -> None:
+    pipeline = _get_pipeline(genre)
     tasks[task_id]["status"] = "processing"
 
     async def progress_callback(step: int, total: int, step_name: str, message: str) -> None:
@@ -61,27 +61,23 @@ async def convert(request: ConvertRequest) -> ConvertResponse:
     if len(text) < 100:
         raise HTTPException(status_code=400, detail="文本内容过短，至少需要 100 个字符")
 
-    chapter_pattern = __import__("re").compile(
-        r"(?:^|\n)\s*(第[一二三四五六七八九十百千万\d]+[章节回])",
-        __import__("re").MULTILINE,
-    )
-    chapter_count = len(chapter_pattern.findall(text))
-    if chapter_count < 3 and len(text) > 5000:
-        pass
+    genre = request.genre.strip()
+    if genre not in ["武侠", "玄幻", "科幻", "言情", "叙事", "魔幻"]:
+        genre = "叙事"
 
     task_id = str(uuid.uuid4())
     tasks[task_id] = {
         "status": "pending",
         "progress": {
             "step": 0,
-            "total": 5,
+            "total": 7,
             "step_name": "初始化",
             "message": "任务已创建，等待处理...",
         },
         "result": None,
     }
 
-    asyncio.create_task(_run_pipeline(task_id, text))
+    asyncio.create_task(_run_pipeline(task_id, text, genre))
     return ConvertResponse(task_id=task_id)
 
 
