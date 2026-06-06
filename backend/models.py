@@ -43,8 +43,14 @@ class SchemaValidation(BaseModel):
 class Meta(BaseModel):
     title: str
     genre: str = ""
+<<<<<<< HEAD
     source_chapters: int = 0
     total_scenes: int = 0
+=======
+    chapter_count: int = 0
+    scene_count: int = 0
+    character_count: int = 0
+>>>>>>> 63ce69f6a2c1e575377a37604d227d7053933c57
     characters: list[str] = Field(default_factory=list)
     character_details: list[dict] = Field(default_factory=list)
     validation: Optional[ValidationResult] = None
@@ -52,6 +58,7 @@ class Meta(BaseModel):
     generated_at: str = Field(default_factory=lambda: datetime.now().isoformat())
 
 
+<<<<<<< HEAD
 class ConvertRequest(BaseModel):
     text: str
     genre: str = "叙事"
@@ -67,3 +74,30 @@ class ProgressEvent(BaseModel):
     total: int
     step_name: str
     message: str
+=======
+class AuthRequest(BaseModel):
+    username: str
+    password: str
+
+
+class GenreItem(BaseModel):
+    name: str
+    guidance: str = ""
+    keywords: list[str] = []
+
+
+class CreateProjectRequest(BaseModel):
+    title: str
+    genre: str = "叙事"
+
+
+class UpdateScriptRequest(BaseModel):
+    scene_id: int
+    scene_heading: Optional[str] = None
+    location: Optional[str] = None
+    time_of_day: Optional[str] = None
+    characters_present: Optional[list[str]] = None
+    action: Optional[list[str]] = None
+    dialogues: Optional[list[dict]] = None
+    transition: Optional[str] = None
+>>>>>>> 63ce69f6a2c1e575377a37604d227d7053933c57

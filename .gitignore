@@ -1,5 +1,41 @@
+<<<<<<< HEAD
 __pycache__/
 *.pyc
 node_modules/
 dist/
 .env
+=======
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+*.egg
+
+# Virtual environment
+venv/
+backend/venv/
+.venv/
+
+# Environment
+.env
+
+# Database
+*.db
+
+# User data
+users.json
+backend/uploads/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node
+frontend/node_modules/
+frontend/dist/
+>>>>>>> 63ce69f6a2c1e575377a37604d227d7053933c57

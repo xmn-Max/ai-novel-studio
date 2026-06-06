@@ -3,3 +3,11 @@ uvicorn[standard]>=0.29.0
 openai>=1.30.0
 pyyaml>=6.0
 python-multipart>=0.0.9
+<<<<<<< HEAD
+=======
+python-dotenv>=1.0.0
+aiosqlite>=0.20.0
+python-docx>=1.1.0
+PyPDF2>=3.0.0
+bcrypt>=4.0.0
+>>>>>>> 63ce69f6a2c1e575377a37604d227d7053933c57
