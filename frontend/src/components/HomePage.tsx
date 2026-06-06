@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { listProjects, createProject, deleteProject, fetchGenres, ProjectSummary } from '../api';
+import GenreManager from './GenreManager';
 
 interface Props {
   username: string;
@@ -14,6 +15,7 @@ export default function HomePage({ username, onLogout, onOpenProject }: Props) {
   const [newTitle, setNewTitle] = useState('');
   const [newGenre, setNewGenre] = useState('叙事');
   const [loading, setLoading] = useState(false);
+  const [showGenreManager, setShowGenreManager] = useState(false);
 
   const loadProjects = async () => {
     try {
@@ -90,7 +92,15 @@ export default function HomePage({ username, onLogout, onOpenProject }: Props) {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">小说类型</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-medium text-slate-500">小说类型</label>
+                    <button
+                      onClick={() => setShowGenreManager(true)}
+                      className="text-xs text-indigo-600 hover:text-indigo-700"
+                    >
+                      + 管理类型
+                    </button>
+                  </div>
                   <select
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none"
                     value={newGenre}
@@ -147,6 +157,14 @@ export default function HomePage({ username, onLogout, onOpenProject }: Props) {
             </div>
           )}
         </section>
+
+        <GenreManager
+          show={showGenreManager}
+          onClose={() => setShowGenreManager(false)}
+          onUpdate={() => {
+            fetchGenres().then(setGenres).catch(() => {});
+          }}
+        />
       </main>
     </div>
   );

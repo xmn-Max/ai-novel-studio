@@ -2,9 +2,49 @@
   {
     "username": "123",
     "password_hash": "$2b$12$59A9bwGH1vRNQlrRXXdj4OdHSbN4mIfLtP7RvysvDzsks7LLUrK5.",
-    "token": "a640ffa1-87db-491f-835f-66c157e7be44",
-    "genres": [],
+    "token": "b270b295-6ba6-4152-bc5d-5be46d7b09fe",
+    "genres": [
+      {
+        "name": "科技",
+        "guidance": "这是一部科技小说，请重点关注技术体系、系统异常、技术使命与伦理冲突。主角候选优先考虑科学家、工程师或关键技术突破者，强调技术如何驱动世界变化与社会结构重构。",
+        "keywords": [
+          "发明"
+        ]
+      }
+    ],
     "created_at": "2026-06-05T23:34:51.686261",
-    "token_created_at": "2026-06-06T09:49:58.328064"
+    "token_created_at": "2026-06-06T15:40:58.230073"
+  },
+  {
+    "username": "xmn",
+    "password_hash": "$2b$12$X7awF3./03VnallEzLx7seOuXFgruzF7e4b7nkl374gH35JyArmpG",
+    "token": "a696fdbd-1386-4c71-8ece-a439b4aa9f07",
+    "token_created_at": "2026-06-06T16:08:23.441219",
+    "genres": [],
+    "created_at": "2026-06-06T16:08:23.441219"
+  },
+  {
+    "username": "1234",
+    "password_hash": "$2b$12$BnkzBfo7CVE4M6y2RyvUt.gBFyahEMFZnjzSHfaSB8C1UWjU3rWDS",
+    "token": "c789907a-f626-4048-bc5b-cf448d61101e",
+    "token_created_at": "2026-06-06T16:08:51.907679",
+    "genres": [],
+    "created_at": "2026-06-06T16:08:51.907679"
+  },
+  {
+    "username": "567",
+    "password_hash": "$2b$12$siELKOrNUHIlgVTSUXqUWOae2ZUljse0Qrxj5PhjXTNKL5mgorAa2",
+    "token": "288486bd-9e5e-4695-90ec-7a1bd11d6e84",
+    "token_created_at": "2026-06-06T16:18:11.636025",
+    "genres": [],
+    "created_at": "2026-06-06T16:18:11.636025"
+  },
+  {
+    "username": "qwe",
+    "password_hash": "$2b$12$7r/HD6485XCEJZ2lyfvvnurYRY/aL9c6AoM8rsxrLG3hfjyL4Oeyq",
+    "token": "6c62bf19-521a-4e4d-9380-c1b741413c2e",
+    "token_created_at": "2026-06-06T22:27:32.923991",
+    "genres": [],
+    "created_at": "2026-06-06T22:27:32.923991"
   }
 ]

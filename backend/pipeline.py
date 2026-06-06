@@ -14,12 +14,18 @@ from llm import call_llm, parse_json_object
 from models import ValidationResult, SchemaValidation
 
 CHAPTER_PATTERN = re.compile(
-    r"(?:^|\n)\s*(第[一二三四五六七八九十百千万\d]+[章节回])\s*[^\n]*",
+    r"(?:^|\n)\s*((?:第[一二三四五六七八九十百千万\d]+[卷集部])?\s*第[一二三四五六七八九十百千万\d]+[章节回])\s*[^\n]*",
     re.MULTILINE,
 )
 
 GENRES_FILE = Path(__file__).parent / "genres.json"
 TOTAL_STEPS = 8
+
+LLM_TIMEOUT_SECONDS = 120
+PLOT_TRUNCATE_CHARS = 8000
+SCENE_PLAN_TRUNCATE_CHARS = 6000
+WORLD_TRUNCATE_CHARS = 8000
+SCHEMA_FIX_TRUNCATE_CHARS = 3000
 
 
 def _load_genres() -> list[dict[str, Any]]:
@@ -124,6 +130,7 @@ class Pipeline:
             "scene_plan": scene_plan,
             "world_building": world_building,
             "chapters": chapters,
+            "script_scenes": script_scenes,
         }
 
     async def run_plot_analysis(self, text: str) -> dict[str, Any]:
@@ -134,6 +141,57 @@ class Pipeline:
     async def run_world_building(self, text: str) -> dict[str, Any]:
         cleaned = self._clean_text(text)
         return await self._build_world(cleaned)
+
+    async def regenerate_script(
+        self, feedback: str, current_script: str, characters: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        char_names = json.dumps([c.get("name", "") for c in characters], ensure_ascii=False)
+        prompt = prompts.REGENERATE_SCRIPT_PROMPT.format(
+            genre_guidance=self.genre_guidance,
+            characters=char_names,
+            current_script=current_script[:6000],
+            feedback=feedback,
+        )
+        result = await call_llm(self.client, self.model, prompt, feedback)
+        data = parse_json_object(result)
+        scenes = data.get("scenes", []) if data else []
+        for i, s in enumerate(scenes):
+            if not s.get("scene_id"):
+                s["scene_id"] = i + 1
+        return scenes
+
+    async def requery_plot(self, feedback: str, current_plot: dict[str, Any], characters: list[dict[str, Any]]) -> dict[str, Any]:
+        char_names = json.dumps([c.get("name", "") for c in characters], ensure_ascii=False)
+        prompt = prompts.REQUERY_PLOT_PROMPT.format(
+            genre_guidance=self.genre_guidance,
+            characters=char_names,
+            current_plot=json.dumps(current_plot, ensure_ascii=False, indent=2)[:4000],
+            feedback=feedback,
+        )
+        result = await call_llm(self.client, self.model, prompt, feedback)
+        data = parse_json_object(result)
+        return data if data else current_plot
+
+    async def requery_world(self, feedback: str, current_world: dict[str, Any]) -> dict[str, Any]:
+        prompt = prompts.REQUERY_WORLD_PROMPT.format(
+            genre_guidance=self.genre_guidance,
+            current_world=json.dumps(current_world, ensure_ascii=False, indent=2)[:4000],
+            feedback=feedback,
+        )
+        result = await call_llm(self.client, self.model, prompt, feedback)
+        data = parse_json_object(result)
+        return data if data else current_world
+
+    async def requery_characters(self, feedback: str, current_characters: list[dict[str, Any]], original_text: str = "") -> list[dict[str, Any]]:
+        prompt = prompts.REQUERY_CHARACTERS_PROMPT.format(
+            genre_guidance=self.genre_guidance,
+            original_text=original_text[:3000],
+            current_characters=json.dumps(current_characters, ensure_ascii=False, indent=2)[:4000],
+            feedback=feedback,
+        )
+        result = await call_llm(self.client, self.model, prompt, feedback)
+        data = parse_json_object(result)
+        return data.get("characters", []) if data else current_characters
 
     def _clean_text(self, text: str) -> str:
         text = re.sub(r"[ \t]+", " ", text)
@@ -172,7 +230,7 @@ class Pipeline:
 
     async def _analyze_plot(self, text: str, characters: list[dict[str, Any]]) -> dict[str, Any]:
         char_names = json.dumps([c.get("name", "") for c in characters], ensure_ascii=False)
-        context = text[:8000] if len(text) > 8000 else text
+        context = text[:PLOT_TRUNCATE_CHARS] if len(text) > PLOT_TRUNCATE_CHARS else text
         prompt = prompts.PLOT_ANALYSIS_PROMPT.format(
             genre_guidance=self.genre_guidance, characters=char_names)
         result = await call_llm(self.client, self.model, prompt, context)
@@ -195,7 +253,7 @@ class Pipeline:
     async def _plan_scenes(self, text: str, characters: list[dict[str, Any]], plot: dict[str, Any]) -> list[dict[str, Any]]:
         char_names = json.dumps([c.get("name", "") for c in characters], ensure_ascii=False)
         events = json.dumps(plot.get("events", []), ensure_ascii=False)
-        context = text[:6000] if len(text) > 6000 else text
+        context = text[:SCENE_PLAN_TRUNCATE_CHARS] if len(text) > SCENE_PLAN_TRUNCATE_CHARS else text
         prompt = prompts.SCENE_PLANNING_PROMPT.format(
             genre_guidance=self.genre_guidance, characters=char_names, events=events)
         result = await call_llm(self.client, self.model, prompt, context)
@@ -263,7 +321,7 @@ class Pipeline:
         return parsed if parsed else {}
 
     async def _build_world(self, text: str) -> dict[str, Any]:
-        context = text[:8000] if len(text) > 8000 else text
+        context = text[:WORLD_TRUNCATE_CHARS] if len(text) > WORLD_TRUNCATE_CHARS else text
         prompt = prompts.WORLD_BUILDING_PROMPT.format(genre_guidance=self.genre_guidance)
         result = await call_llm(self.client, self.model, prompt, context)
         data = parse_json_object(result) or {}
@@ -310,7 +368,8 @@ class Pipeline:
             candidate = sorted_chars[0] if sorted_chars else ""
 
         chapter_passes = sum(
-            1 for ch in chapters if (candidate and ch.get("content", "").count(candidate) >= 5)
+            1 for ch in chapters
+            if candidate and len(re.findall(rf"\b{re.escape(candidate)}\b", ch.get("content", ""))) >= 5
         )
         if len(chapters) > 0 and chapter_passes == len(chapters):
             count += 1
@@ -391,7 +450,7 @@ class Pipeline:
         for s in script_scenes:
             scene_data = json.dumps(s, ensure_ascii=False)
             prompt = prompts.SCHEMA_FIX_PROMPT.format(
-                characters=char_names, scene_data=scene_data[:3000], issues=issues)
+                characters=char_names, scene_data=scene_data[:SCHEMA_FIX_TRUNCATE_CHARS], issues=issues)
             try:
                 result = await call_llm(self.client, self.model, prompt, scene_data[:2000])
                 fixed = parse_json_object(result)

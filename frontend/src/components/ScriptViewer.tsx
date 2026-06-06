@@ -171,7 +171,7 @@ export default function ScriptViewer({ scenes, projectId, onUpdate }: Props) {
       {/* Edit Modal */}
       {editingScene !== null && editData && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
-          <div className="bg-white rounded-xl shadow-lg border border-slate-200 p-6 w-full max-w-lg max-h-[80vh] overflow-auto">
+          <div className="bg-white rounded-xl shadow-lg border border-slate-200 p-6 w-full max-w-xl max-h-[85vh] overflow-auto">
             <h3 className="text-lg font-semibold text-slate-900 mb-4">编辑场景 S{editData.scene_id}</h3>
             <div className="space-y-3">
               <div>
@@ -189,8 +189,29 @@ export default function ScriptViewer({ scenes, projectId, onUpdate }: Props) {
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1">动作描述</label>
+                <label className="block text-xs font-medium text-slate-500 mb-1">出场角色（逗号分隔）</label>
+                <input className="w-full px-3 py-1.5 border border-slate-300 rounded text-sm" value={editData.characters_present.join(', ')} onChange={e => setEditData({ ...editData, characters_present: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-500 mb-1">动作描述（每行一条）</label>
                 <textarea className="w-full px-3 py-1.5 border border-slate-300 rounded text-sm h-20 font-mono" value={editData.action.join('\n')} onChange={e => setEditData({ ...editData, action: e.target.value.split('\n').filter(Boolean) })} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-500 mb-1">对白（格式：角色名:台词）</label>
+                <textarea className="w-full px-3 py-1.5 border border-slate-300 rounded text-sm h-28 font-mono" value={editData.dialogues.map(d => `${d.character}: ${d.line}${d.parenthetical ? ` (${d.parenthetical})` : ''}`).join('\n')} onChange={e => {
+                  const lines = e.target.value.split('\n').filter(Boolean);
+                  const dialogues = lines.map(line => {
+                    const colonIdx = line.indexOf(':');
+                    if (colonIdx === -1) return { character: '', line: line, parenthetical: '' };
+                    const character = line.slice(0, colonIdx).trim();
+                    const rest = line.slice(colonIdx + 1).trim();
+                    const parenMatch = rest.match(/\(([^)]+)\)\s*$/);
+                    return parenMatch
+                      ? { character, line: rest.slice(0, parenMatch.index).trim(), parenthetical: parenMatch[1] }
+                      : { character, line: rest, parenthetical: '' };
+                  });
+                  setEditData({ ...editData, dialogues });
+                }} />
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-500 mb-1">转场</label>

@@ -217,7 +217,10 @@ export function subscribeProgress(
   const token = getToken();
   const es = new EventSource(`${API_BASE}/convert/${taskId}/progress?token=${encodeURIComponent(token)}`);
 
+  let receivedData = false;
+
   es.onmessage = (event) => {
+    receivedData = true;
     try {
       const data: ProgressEvent = JSON.parse(event.data);
       onProgress(data);
@@ -235,7 +238,11 @@ export function subscribeProgress(
   };
 
   es.onerror = () => {
-    onError('连接中断，请重试');
+    if (!receivedData) {
+      onError('连接被拒绝，请检查登录状态');
+    } else {
+      onError('连接中断，请重试');
+    }
     es.close();
   };
 
@@ -298,6 +305,79 @@ export async function updateScriptScene(
   await handleResponse(res);
 }
 
+export async function updateCharacter(
+  projectId: string, charId: string, field: string, value: string,
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/projects/${projectId}/characters/${charId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ field, value }),
+  });
+  await handleResponse(res);
+}
+
+export async function updatePlotField(
+  projectId: string, field: string, value: string,
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/projects/${projectId}/plot`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ field, value }),
+  });
+  await handleResponse(res);
+}
+
+export async function updateScenePlanItem(
+  projectId: string, planId: string, field: string, value: string,
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/projects/${projectId}/scene-plan/${planId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ field, value }),
+  });
+  await handleResponse(res);
+}
+
+// Versions
+export interface VersionItem {
+  version_id: string;
+  label: string;
+  feedback: string;
+  timestamp_ms: number;
+}
+
+export interface VersionSnapshot {
+  label: string;
+  snapshot: Record<string, unknown>;
+}
+
+export async function saveVersion(projectId: string, feedback: string): Promise<{ label: string }> {
+  const res = await fetch(`${API_BASE}/projects/${projectId}/versions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ feedback }),
+  });
+  return handleResponse(res);
+}
+
+export async function listVersions(projectId: string): Promise<VersionItem[]> {
+  const res = await fetch(`${API_BASE}/projects/${projectId}/versions`, { headers: authHeaders() });
+  return handleResponse(res);
+}
+
+export async function getVersion(projectId: string, versionId: string): Promise<VersionSnapshot> {
+  const res = await fetch(`${API_BASE}/projects/${projectId}/versions/${versionId}`, { headers: authHeaders() });
+  return handleResponse(res);
+}
+
+export async function restoreVersion(projectId: string, versionId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/projects/${projectId}/versions/${versionId}/restore`, {
+    method: 'POST',
+    headers: authHeaders(),
+  });
+  await handleResponse(res);
+}
+
 // Genres
 
 export async function fetchGenres(): Promise<GenreItem[]> {
@@ -339,5 +419,27 @@ export async function getProjectState(projectId: string): Promise<{ state: strin
 
 export async function fetchSteps(): Promise<string[]> {
   const res = await fetch(`${API_BASE}/steps`, { headers: authHeaders() });
+  return handleResponse(res);
+}
+
+export async function regenerateScript(
+  projectId: string, feedback: string,
+): Promise<{ scenes: Array<Record<string, unknown>> }> {
+  const res = await fetch(`${API_BASE}/projects/${projectId}/regenerate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ feedback }),
+  });
+  return handleResponse(res);
+}
+
+export async function requerySection(
+  projectId: string, feedback: string, target: string,
+): Promise<Record<string, unknown>> {
+  const res = await fetch(`${API_BASE}/projects/${projectId}/requery`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ feedback, target }),
+  });
   return handleResponse(res);
 }

@@ -21,6 +21,7 @@ async def call_llm(client: AsyncOpenAI, model: str, system_prompt: str, user_con
                 temperature=0.7,
                 max_tokens=4096,
                 response_format={"type": "json_object"},
+                timeout=120.0,
             )
             content = response.choices[0].message.content
             if not content:

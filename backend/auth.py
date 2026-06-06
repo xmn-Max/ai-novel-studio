@@ -105,14 +105,15 @@ def verify_token(token: str) -> Optional[dict]:
     now = datetime.now()
     for u in users:
         if u.get("token") == token:
-            created = u.get("token_created_at", u.get("created_at", ""))
-            if created:
-                try:
-                    created_dt = datetime.fromisoformat(created)
-                    if now - created_dt > timedelta(hours=TOKEN_TTL_HOURS):
-                        return None
-                except (ValueError, TypeError):
-                    pass
+            created = u.get("token_created_at", "")
+            if not created:
+                return None
+            try:
+                created_dt = datetime.fromisoformat(created)
+                if now - created_dt > timedelta(hours=TOKEN_TTL_HOURS):
+                    return None
+            except (ValueError, TypeError):
+                return None
             return {"username": u["username"], "created_at": u.get("created_at", "")}
     return None
 

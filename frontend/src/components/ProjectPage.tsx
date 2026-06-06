@@ -1,17 +1,21 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   getProject, startProjectConversion, subscribeProgress, fetchResult,
-  uploadFile, runPlotAnalysis, runWorldBuilding, fetchSteps,
+  uploadFile, fetchSteps,
   ProgressEvent, ConversionResult, ProjectFull,
 } from '../api';
 import WorkflowStepper from './WorkflowStepper';
 import UploadSection from './UploadSection';
-import CharacterTable from './CharacterTable';
-import PlotSection from './PlotSection';
+import EditableCharacterTable from './EditableCharacterTable';
+import EditablePlotSection from './EditablePlotSection';
 import WorldSection from './WorldSection';
-import ScenePlanTable from './ScenePlanTable';
+import EditableScenePlanTable from './EditableScenePlanTable';
 import ScriptViewer from './ScriptViewer';
 import PluginPanel from './PluginPanel';
+import FeedbackPanel from './FeedbackPanel';
+import VersionHistory from './VersionHistory';
+import { useProtagonistValidation } from './useProtagonistValidation';
+import { requerySection, saveVersion } from '../api';
 
 interface Props {
   projectId: string;
@@ -33,8 +37,14 @@ export default function ProjectPage({ projectId, onBack }: Props) {
   const [progress, setProgress] = useState<ProgressEvent | null>(null);
   const [result, setResult] = useState<ConversionResult | null>(null);
   const [error, setError] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
   const [uploading, setUploading] = useState(false);
   const [steps, setSteps] = useState<string[]>([]);
+  const [feedbackVisible, setFeedbackVisible] = useState(false);
+  const [feedbackPrefill, setFeedbackPrefill] = useState('');
+  const [versionVisible, setVersionVisible] = useState(false);
+  const [lastFeedback, setLastFeedback] = useState('');
+  const [feedbackTarget, setFeedbackTarget] = useState<string>('script');
 
   const chapterCount = countChapters(text);
 
@@ -67,57 +77,61 @@ export default function ProjectPage({ projectId, onBack }: Props) {
   };
 
   const handleConvert = async () => {
-    if (text.trim().length < 100) {
-      setError('文本过短，至少需要 100 个字符');
-      return;
-    }
+    if (text.trim().length < 100) { setError('文本过短，至少需要 100 个字符'); return; }
     setConverting(true);
     setError('');
     setResult(null);
     try {
       const { task_id } = await startProjectConversion(projectId, text);
-      subscribeProgress(
-        task_id,
+      subscribeProgress(task_id,
         (e) => setProgress(e),
         async () => {
-          try {
-            const res = await fetchResult(task_id);
-            setResult(res);
-            setConverting(false);
-            loadProject();
-          } catch (err: unknown) {
-            setError(err instanceof Error ? err.message : '获取结果失败');
-            setConverting(false);
-          }
+          try { const res = await fetchResult(task_id); setResult(res); setConverting(false); loadProject(); }
+          catch (err: unknown) { setError(err instanceof Error ? err.message : '获取结果失败'); setConverting(false); }
         },
         (err) => { setError(err); setConverting(false); },
       );
+    } catch (err: unknown) { setError(err instanceof Error ? err.message : '启动失败'); setConverting(false); }
+  };
+
+  const openFeedback = (prefill: string, target: string = 'script') => {
+    setFeedbackPrefill(prefill);
+    setFeedbackTarget(target);
+    setFeedbackVisible(true);
+  };
+
+  const handleRegenerate = async (feedback: string) => {
+    setError('');
+
+    try {
+      await saveVersion(projectId, feedback);
+
+      await requerySection(projectId, feedback, feedbackTarget);
+
+      const targetLabels: Record<string, string> = {
+        script: '剧本',
+        plot: '剧情分析',
+        world: '世界观',
+        characters: '角色设定',
+      };
+      const label = targetLabels[feedbackTarget] || feedbackTarget;
+      setSuccessMsg(`${label}已根据反馈重新生成 ✓`);
+      setTimeout(() => setSuccessMsg(''), 5000);
+      setFeedbackVisible(false);
+      setLastFeedback(feedback);
+
+      await loadProject();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : '启动失败');
-      setConverting(false);
+      setError(err instanceof Error ? err.message : 'AI 重新询问失败，请重试');
+      setTimeout(() => setError(''), 5000);
     }
-  };
-
-  const handlePlotAnalysis = async () => {
-    if (!text.trim()) return;
-    try {
-      await runPlotAnalysis(projectId, text);
-      loadProject();
-    } catch { /* ignore */ }
-  };
-
-  const handleWorldAnalysis = async () => {
-    if (!text.trim()) return;
-    try {
-      await runWorldBuilding(projectId, text);
-      loadProject();
-    } catch { /* ignore */ }
   };
 
   const project = data?.project;
   const isComplete = project?.state === 'COMPLETED';
 
   const characters = (data?.characters?.length ? data.characters : result?.meta?.character_details) || [];
+  const protagonist = useProtagonistValidation(characters as Array<{ id?: string; name: string; role?: string }>);
   const plot = (result?.plot || data?.plot) as Record<string, unknown> | null;
   const wb = (result?.world_building || data?.world_building) as Record<string, unknown> | null;
   const scenePlan = ((result?.scene_plan || data?.scene_plan) || []) as Array<{
@@ -140,61 +154,63 @@ export default function ProjectPage({ projectId, onBack }: Props) {
             }`}>{project.state}</span>
           )}
         </div>
-        <span className="text-xs text-slate-400">{project?.genre}</span>
+        <div className="flex items-center gap-3">
+          {protagonist.exists && (
+            <span className={`text-xs px-2 py-0.5 rounded ${protagonist.isUnique ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}`}>
+              主角: {protagonist.protagonistName} {protagonist.isUnique ? '✓' : '⚠'}
+            </span>
+          )}
+          <button
+            onClick={() => setVersionVisible(true)}
+            className="text-xs px-2 py-0.5 text-indigo-600 border border-indigo-200 rounded hover:bg-indigo-50 transition-colors"
+          >
+            版本历史
+          </button>
+          <span className="text-xs text-slate-400">{project?.genre}</span>
+        </div>
       </header>
 
       <main className="max-w-4xl mx-auto px-6 py-6 space-y-8">
         <UploadSection
-          text={text}
-          onTextChange={setText}
-          fileName={fileName}
-          chapterCount={chapterCount}
-          converting={converting}
-          uploading={uploading}
-          error={error}
-          onFileUpload={handleFileUpload}
-          onConvert={handleConvert}
+          text={text} onTextChange={setText} fileName={fileName}
+          chapterCount={chapterCount} converting={converting} uploading={uploading}
+          error={error} onFileUpload={handleFileUpload} onConvert={handleConvert}
           onClearError={() => setError('')}
         />
+
+        {successMsg && (
+          <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-700 flex justify-between items-center">
+            <span>{successMsg}</span>
+            <button onClick={() => setSuccessMsg('')} className="text-emerald-400 hover:text-emerald-600">&times;</button>
+          </div>
+        )}
 
         {(converting || progress) && (
           <section>
             <WorkflowStepper
-              step={progress?.step || 0}
-              total={progress?.total || 8}
-              stepName={progress?.step_name || ''}
-              message={progress?.message || ''}
-              status={converting ? 'processing' : 'completed'}
-              steps={steps}
+              step={progress?.step || 0} total={progress?.total || 8}
+              stepName={progress?.step_name || ''} message={progress?.message || ''}
+              status={converting ? 'processing' : 'completed'} steps={steps}
             />
           </section>
         )}
 
-        {result?.meta?.validation && (
-          <section>
-            <div className={`p-3 rounded-lg border text-sm ${
-              result.meta.validation.count >= 2
-                ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
-                : 'bg-amber-50 border-amber-200 text-amber-700'
-            }`}>
-              <span className="font-medium">主角: {result.meta.validation.main_character}</span>
-              <span className="mx-2">|</span>
-              <span>{result.meta.validation.status}</span>
-              {result.meta.validation.retried && <span className="ml-2 text-xs">(已重试)</span>}
-            </div>
-            {result.meta.schema_validation && result.meta.schema_validation.warnings.length > 0 && (
-              <details className="mt-2">
-                <summary className="text-xs text-slate-500 cursor-pointer">
-                  Schema 校验警告 ({result.meta.schema_validation.warnings.length})
-                </summary>
-                <ul className="mt-1 space-y-0.5">
-                  {result.meta.schema_validation.warnings.map((w, i) => (
-                    <li key={i} className="text-xs text-amber-600 pl-3">{w}</li>
-                  ))}
-                </ul>
-              </details>
-            )}
-          </section>
+        {/* Protagonist validation status */}
+        {protagonist.exists && !protagonist.isUnique && (
+          <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+            <span className="font-medium">主角验证失败：</span>{protagonist.message}
+          </div>
+        )}
+
+        {result?.meta?.schema_validation && result.meta.schema_validation.warnings.length > 0 && (
+          <details className="text-xs text-slate-500">
+            <summary>Schema 校验警告 ({result.meta.schema_validation.warnings.length})</summary>
+            <ul className="mt-1 space-y-0.5">
+              {result.meta.schema_validation.warnings.map((w, i) => (
+                <li key={i} className="text-amber-600 pl-3">{w}</li>
+              ))}
+            </ul>
+          </details>
         )}
 
         {result?.meta && (
@@ -206,10 +222,27 @@ export default function ProjectPage({ projectId, onBack }: Props) {
           </div>
         )}
 
-        <CharacterTable characters={characters} />
-        <PlotSection plot={plot} isComplete={isComplete} onReAnalyze={handlePlotAnalysis} />
-        <WorldSection wb={wb} isComplete={isComplete} onReAnalyze={handleWorldAnalysis} />
-        <ScenePlanTable items={scenePlan} />
+        <EditableCharacterTable
+          characters={characters}
+          projectId={projectId}
+          onUpdate={loadProject}
+        />
+
+        <EditablePlotSection
+          plot={plot}
+          projectId={projectId}
+          isComplete={isComplete}
+          onUpdate={loadProject}
+          onOpenFeedback={(prefill: string) => openFeedback(prefill, 'plot')}
+        />
+
+        <WorldSection wb={wb} isComplete={isComplete} onReAnalyze={() => openFeedback('请改进世界观分析：', 'world')} />
+
+        <EditableScenePlanTable
+          items={scenePlan}
+          projectId={projectId}
+          onUpdate={loadProject}
+        />
 
         {data?.script_scenes?.length ? (
           <section>
@@ -226,20 +259,19 @@ export default function ProjectPage({ projectId, onBack }: Props) {
           </section>
         ) : null}
 
-        {result?.yaml && (
+        {(result?.yaml || data?.yaml_data?.yaml_content) && (
           <div className="flex justify-center">
             <button
               onClick={() => {
-                const blob = new Blob([result.yaml], { type: 'text/yaml' });
+                const yamlContent = data?.yaml_data?.yaml_content || result?.yaml || '';
+                const blob = new Blob([yamlContent], { type: 'text/yaml' });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url; a.download = `${project?.title || 'script'}.yaml`; a.click();
                 URL.revokeObjectURL(url);
               }}
               className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-semibold hover:bg-emerald-700 transition-colors"
-            >
-              下载 YAML 剧本
-            </button>
+            >下载 YAML 剧本</button>
           </div>
         )}
 
@@ -256,7 +288,36 @@ export default function ProjectPage({ projectId, onBack }: Props) {
           </section>
         )}
 
+        <FeedbackPanel
+          onRegenerate={handleRegenerate}
+          disabled={converting}
+          prefillText={feedbackPrefill}
+          visible={feedbackVisible}
+          onVisibilityChange={setFeedbackVisible}
+          target={feedbackTarget}
+        />
+
+        {/* Floating re-analyze button when panel is hidden */}
+        {(isComplete || result) && !feedbackVisible && (
+          <div className="flex justify-center">
+            <button
+              onClick={() => openFeedback('请改进以下内容：角色设定、剧情结构、场景安排...', 'script')}
+              className="px-6 py-3 bg-indigo-600 text-white rounded-xl text-sm font-semibold hover:bg-indigo-700 shadow-lg hover:shadow-xl transition-all"
+            >
+              AI 改进反馈
+            </button>
+          </div>
+        )}
+
         <div className="h-12" />
+
+        <VersionHistory
+          projectId={projectId}
+          visible={versionVisible}
+          onClose={() => setVersionVisible(false)}
+          onRestored={loadProject}
+          feedbackText={lastFeedback}
+        />
       </main>
     </div>
   );
