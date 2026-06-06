@@ -1,3 +1,10 @@
+<<<<<<< HEAD
+__pycache__/
+*.pyc
+node_modules/
+dist/
+.env
+=======
 # Python
 __pycache__/
 *.py[cod]
@@ -31,3 +38,4 @@ Thumbs.db
 # Node
 frontend/node_modules/
 frontend/dist/
+>>>>>>> 63ce69f6a2c1e575377a37604d227d7053933c57
