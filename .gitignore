@@ -1,5 +1,33 @@
+# Python
 __pycache__/
-*.pyc
-node_modules/
+*.py[cod]
+*.egg-info/
 dist/
+*.egg
+
+# Virtual environment
+venv/
+backend/venv/
+.venv/
+
+# Environment
 .env
+
+# Database
+*.db
+
+# User data
+users.json
+backend/uploads/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node
+frontend/node_modules/
+frontend/dist/
