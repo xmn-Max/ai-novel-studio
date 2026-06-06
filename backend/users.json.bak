@@ -1,0 +1,15 @@
+[
+  {
+    "username": "123456",
+    "password_hash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+    "token": "c54eb978-e2f1-4261-9051-4d96fb48439b",
+    "created_at": "2026-06-05T16:08:05.646712"
+  },
+  {
+    "username": "123",
+    "password_hash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+    "token": "95f263e8-38ff-4c5a-b3ad-16dc2e0f0e86",
+    "genres": [],
+    "created_at": "2026-06-06T16:27:29.531217"
+  }
+]
