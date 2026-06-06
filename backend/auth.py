@@ -4,11 +4,14 @@ import hashlib
 import uuid
 from typing import Optional
 
+import bcrypt
+
 from database import (
     db_create_user,
     db_get_user_by_token,
     db_get_user_by_username,
     db_update_user_token,
+    db_update_user_password,
     db_get_user_genres,
     db_count_user_genres,
     db_add_user_genre,
@@ -19,8 +22,33 @@ from database import (
 MAX_USER_GENRES = 10
 
 
-def _hash(password: str) -> str:
+def _hash_sha256(password: str) -> str:
     return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+
+def _hash_bcrypt(password: str) -> str:
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+
+def _check_bcrypt(password: str, hashed: str) -> bool:
+    try:
+        return bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8"))
+    except ValueError:
+        return False
+
+
+def _is_sha256_hash(hashed: str) -> bool:
+    return len(hashed) == 64 and all(c in "0123456789abcdef" for c in hashed)
+
+
+def _verify_password(password: str, stored_hash: str) -> bool:
+    if _is_sha256_hash(stored_hash):
+        return _hash_sha256(password) == stored_hash
+    return _check_bcrypt(password, stored_hash)
+
+
+def _needs_rehash(stored_hash: str) -> bool:
+    return _is_sha256_hash(stored_hash)
 
 
 def register_user(username: str, password: str) -> dict:
@@ -29,19 +57,33 @@ def register_user(username: str, password: str) -> dict:
         raise ValueError("用户名已存在")
 
     token = str(uuid.uuid4())
-    return db_create_user(username, _hash(password), token)
+    return db_create_user(username, _hash_bcrypt(password), token)
 
 
 def login_user(username: str, password: str) -> Optional[dict]:
     user = db_get_user_by_username(username)
     if not user:
         return None
-    if user["password_hash"] != _hash(password):
+    if not _verify_password(password, user["password_hash"]):
         return None
+
+    if _needs_rehash(user["password_hash"]):
+        db_update_user_password(username, _hash_bcrypt(password))
 
     token = str(uuid.uuid4())
     db_update_user_token(username, token)
     return {"username": user["username"], "token": token, "created_at": user.get("created_at", "")}
+
+
+def change_password(username: str, old_password: str, new_password: str) -> None:
+    user = db_get_user_by_username(username)
+    if not user:
+        raise ValueError("用户不存在")
+    if not _verify_password(old_password, user["password_hash"]):
+        raise ValueError("原密码错误")
+    if len(new_password) < 4:
+        raise ValueError("新密码至少需要 4 个字符")
+    db_update_user_password(username, _hash_bcrypt(new_password))
 
 
 def verify_token(token: str) -> Optional[dict]:

@@ -15,6 +15,8 @@ import {
   fetchConversions,
   deleteConversion,
   editConversion,
+  changePassword,
+  uploadFile,
   ProgressEvent,
   ConversionResult,
   GenreItem,
@@ -170,6 +172,12 @@ export default function App() {
   const [editedYaml, setEditedYaml] = useState('');
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState('');
+  const [showPwdModal, setShowPwdModal] = useState(false);
+  const [oldPwd, setOldPwd] = useState('');
+  const [newPwd, setNewPwd] = useState('');
+  const [pwdError, setPwdError] = useState('');
+  const [pwdMsg, setPwdMsg] = useState('');
+  const [uploading, setUploading] = useState(false);
   const msgRef = useRef<HTMLDivElement>(null);
 
   const chapterCount = countChapters(text);
@@ -425,6 +433,47 @@ export default function App() {
     setGenreError('');
   }, [genres]);
 
+  const handleChangePassword = useCallback(async () => {
+    setPwdError('');
+    setPwdMsg('');
+    if (!oldPwd || !newPwd) {
+      setPwdError('请填写原密码和新密码');
+      return;
+    }
+    if (newPwd.length < 4) {
+      setPwdError('新密码至少需要 4 个字符');
+      return;
+    }
+    try {
+      await changePassword(oldPwd, newPwd);
+      setPwdMsg('密码修改成功');
+      setOldPwd('');
+      setNewPwd('');
+      setTimeout(() => setShowPwdModal(false), 1500);
+    } catch (err: unknown) {
+      setPwdError(err instanceof Error ? err.message : '修改失败');
+    }
+  }, [oldPwd, newPwd]);
+
+  const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    setError(null);
+    try {
+      const result = await uploadFile(file);
+      setText(result.text);
+      if (result.filename && !title) {
+        const name = result.filename.replace(/\.[^.]+$/, '');
+        setTitle(name);
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : '上传失败');
+    }
+    setUploading(false);
+    e.target.value = '';
+  }, [title]);
+
   useEffect(() => {
     loadGenres();
   }, []);
@@ -539,6 +588,12 @@ export default function App() {
               历史
             </button>
             <span className="text-sm text-slate-500">{username}</span>
+            <button
+              onClick={() => { setShowPwdModal(true); setPwdError(''); setPwdMsg(''); setOldPwd(''); setNewPwd(''); }}
+              className="text-xs text-slate-400 hover:text-indigo-500 transition-colors"
+            >
+              改密
+            </button>
             <button
               onClick={handleLogout}
               className="text-xs text-slate-400 hover:text-red-500 transition-colors"
@@ -681,6 +736,22 @@ export default function App() {
             disabled={phase === 'converting'}
           />
           <div className="flex items-center justify-between mt-3">
+            <div className="flex items-center gap-3">
+              <label className={`inline-flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg border cursor-pointer transition-colors ${
+                uploading ? 'bg-slate-100 text-slate-400 border-slate-200' :
+                'text-indigo-600 border-indigo-200 hover:bg-indigo-50'
+              } ${phase === 'converting' ? 'opacity-50 pointer-events-none' : ''}`}>
+                <span>{uploading ? '上传中...' : '上传文件'}</span>
+                <input
+                  type="file"
+                  accept=".txt,.md,.text,.pdf,.docx,.doc"
+                  onChange={handleFileUpload}
+                  disabled={phase === 'converting' || uploading}
+                  className="hidden"
+                />
+              </label>
+              <span className="text-xs text-slate-400">支持 .txt / .md / .pdf / .docx / .doc</span>
+            </div>
             <span className={`text-sm font-medium ${chapterCount >= 3 ? 'text-emerald-600' : 'text-red-500'}`}>
               检测到 {chapterCount} 个章节{chapterCount < 3 ? '（至少需要3个章节）' : ''}
             </span>
@@ -798,6 +869,22 @@ export default function App() {
                 >
                   下载 YAML
                 </button>
+                {taskId && (
+                  <>
+                    <a
+                      href={`/api/convert/${taskId}/export/pdf?token=${encodeURIComponent(sessionStorage.getItem('auth_token') || '')}`}
+                      className="px-3 py-1.5 text-sm text-rose-600 border border-rose-200 rounded-lg hover:bg-rose-50 transition-colors"
+                    >
+                      PDF
+                    </a>
+                    <a
+                      href={`/api/convert/${taskId}/export/docx?token=${encodeURIComponent(sessionStorage.getItem('auth_token') || '')}`}
+                      className="px-3 py-1.5 text-sm text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50 transition-colors"
+                    >
+                      DOCX
+                    </a>
+                  </>
+                )}
               </div>
             </div>
 
@@ -1108,6 +1195,53 @@ export default function App() {
                   </button>
                 )}
               </div>
+            </div>
+          </section>
+        )}
+
+        {/* Change Password Modal */}
+        {showPwdModal && (
+          <section className="max-w-4xl mx-auto bg-white rounded-xl shadow-lg border border-slate-300 p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-slate-700">修改密码</h2>
+              <button
+                onClick={() => setShowPwdModal(false)}
+                className="text-slate-400 hover:text-slate-600 text-xl leading-none"
+              >
+                ✕
+              </button>
+            </div>
+            {pwdError && (
+              <div className="mb-3 p-2 bg-red-50 border border-red-200 rounded text-sm text-red-600">{pwdError}</div>
+            )}
+            {pwdMsg && (
+              <div className="mb-3 p-2 bg-emerald-50 border border-emerald-200 rounded text-sm text-emerald-600">{pwdMsg}</div>
+            )}
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-slate-500">原密码</label>
+                <input
+                  type="password"
+                  value={oldPwd}
+                  onChange={(e) => setOldPwd(e.target.value)}
+                  className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">新密码（至少 4 个字符）</label>
+                <input
+                  type="password"
+                  value={newPwd}
+                  onChange={(e) => setNewPwd(e.target.value)}
+                  className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                />
+              </div>
+              <button
+                onClick={handleChangePassword}
+                className="w-full py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
+              >
+                确认修改
+              </button>
             </div>
           </section>
         )}

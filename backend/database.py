@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
@@ -196,6 +196,13 @@ def db_get_user_by_token(token: str) -> Optional[dict[str, Any]]:
 def db_update_user_token(username: str, token: str) -> None:
     conn = get_db()
     conn.execute("UPDATE users SET token=? WHERE username=?", (token, username))
+    conn.commit()
+    conn.close()
+
+
+def db_update_user_password(username: str, password_hash: str) -> None:
+    conn = get_db()
+    conn.execute("UPDATE users SET password_hash=? WHERE username=?", (password_hash, username))
     conn.commit()
     conn.close()
 
@@ -408,3 +415,16 @@ def db_update_conversion_yaml(task_id: str, yaml_output: str, username: str) -> 
     updated = cur.rowcount > 0
     conn.close()
     return updated
+
+
+def db_mark_stale_conversions(minutes: int = 30) -> int:
+    conn = get_db()
+    cutoff = (datetime.now() - timedelta(minutes=minutes)).isoformat()
+    cur = conn.execute(
+        "UPDATE conversions SET status='failed', error='任务超时，请重新尝试' WHERE status IN ('pending', 'processing', 'regenerating') AND updated_at < ?",
+        (cutoff,),
+    )
+    conn.commit()
+    count = cur.rowcount
+    conn.close()
+    return count

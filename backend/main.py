@@ -4,18 +4,22 @@ import asyncio
 import json
 import os
 import uuid
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Depends, Header
+from fastapi import FastAPI, HTTPException, Depends, Header, UploadFile, File, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 from models import ConvertRequest, ConvertResponse
 from pipeline import Pipeline
-from auth import register_user, login_user, verify_token
+from auth import register_user, login_user, verify_token, change_password
 from auth import get_user_genres, add_user_genre, update_user_genre, delete_user_genre
 from database import (
     init_db,
@@ -29,12 +33,20 @@ from database import (
     db_list_conversions,
     db_delete_conversion,
     db_update_conversion_yaml,
+    db_mark_stale_conversions,
 )
-
+from middleware import register_exception_handlers
+from export import export_pdf, export_docx, ExportError
 
 init_db()
 
-app = FastAPI(title="AI Novel Studio API", version="0.3.0")
+limiter = Limiter(key_func=get_remote_address, default_limits=["60/minute"])
+
+app = FastAPI(title="AI Novel Studio API", version="0.4.0")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+register_exception_handlers(app)
 
 app.add_middleware(
     CORSMiddleware,
@@ -45,8 +57,6 @@ app.add_middleware(
 )
 
 API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
-
-_pipeline_lock = {}
 
 
 def _load_genres() -> list[dict[str, Any]]:
@@ -91,9 +101,7 @@ async def _run_pipeline(task_id: str, text: str, genre: str, title: str, usernam
 
     try:
         pipeline = _get_pipeline(genre, title)
-        print(f"[DEBUG] Pipeline created, calling pipeline.run...", flush=True)
         result = await pipeline.run(text, progress_callback)
-        print(f"[DEBUG] pipeline.run completed successfully", flush=True)
 
         intermediate = result.pop("_intermediate", None)
         intermediate["original_text"] = text
@@ -116,6 +124,15 @@ async def _run_pipeline(task_id: str, text: str, genre: str, title: str, usernam
         db_update_conversion_status(task_id, "failed", str(e))
 
 
+async def _cleanup_stale_tasks(interval_seconds: int = 600) -> None:
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            db_mark_stale_conversions(minutes=30)
+        except Exception:
+            pass
+
+
 def _require_auth(authorization: str = Header(default="")) -> dict:
     token = ""
     if authorization.startswith("Bearer "):
@@ -133,6 +150,11 @@ def _check_auth(token: str = "") -> dict:
     return user
 
 
+@app.on_event("startup")
+async def startup():
+    asyncio.create_task(_cleanup_stale_tasks())
+
+
 # --- Auth ---
 
 class AuthRequest(BaseModel):
@@ -140,8 +162,14 @@ class AuthRequest(BaseModel):
     password: str
 
 
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str
+
+
 @app.post("/api/auth/register")
-async def api_register(req: AuthRequest) -> dict[str, str]:
+@limiter.limit("10/minute")
+async def api_register(request: Request, req: AuthRequest) -> dict[str, str]:
     if not req.username or not req.password:
         raise HTTPException(status_code=400, detail="用户名和密码不能为空")
     if len(req.username) < 2 or len(req.username) > 20:
@@ -155,7 +183,8 @@ async def api_register(req: AuthRequest) -> dict[str, str]:
 
 
 @app.post("/api/auth/login")
-async def api_login(req: AuthRequest) -> dict[str, str]:
+@limiter.limit("20/minute")
+async def api_login(request: Request, req: AuthRequest) -> dict[str, str]:
     if not req.username or not req.password:
         raise HTTPException(status_code=400, detail="用户名和密码不能为空")
     result = login_user(req.username.strip(), req.password)
@@ -167,6 +196,17 @@ async def api_login(req: AuthRequest) -> dict[str, str]:
 @app.get("/api/auth/me")
 async def api_me(user: dict = Depends(_require_auth)) -> dict:
     return {"username": user["username"], "logged_in": True}
+
+
+@app.post("/api/auth/change-password")
+async def api_change_password(req: ChangePasswordRequest, user: dict = Depends(_require_auth)) -> dict[str, str]:
+    if not req.old_password or not req.new_password:
+        raise HTTPException(status_code=400, detail="原密码和新密码不能为空")
+    try:
+        change_password(user["username"], req.old_password, req.new_password)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"detail": "密码修改成功"}
 
 
 # --- Genre CRUD (per-user) ---
@@ -232,22 +272,22 @@ async def delete_genre(index: int, user: dict = Depends(_require_auth)) -> dict[
 # --- Conversion ---
 
 @app.post("/api/convert", response_model=ConvertResponse)
-async def convert(request: ConvertRequest, user: dict = Depends(_require_auth)) -> ConvertResponse:
-    text = request.text.strip()
+@limiter.limit("5/minute")
+async def convert(request: Request, req: ConvertRequest, user: dict = Depends(_require_auth)) -> ConvertResponse:
+    text = req.text.strip()
     if len(text) < 100:
         raise HTTPException(status_code=400, detail="文本内容过短，至少需要 100 个字符")
 
-    genre = request.genre.strip()
+    genre = req.genre.strip()
     genres = _load_genres()
     valid_names = {g["name"] for g in genres}
     if genre not in valid_names:
         genre = genres[0]["name"] if genres else "叙事"
 
     task_id = str(uuid.uuid4())
-    db_create_conversion(task_id, user["username"], text, genre, request.title.strip())
+    db_create_conversion(task_id, user["username"], text, genre, req.title.strip())
 
-    asyncio.create_task(_run_pipeline(task_id, text, genre, request.title.strip(), user["username"]))
-    print(f"[DEBUG] Convert endpoint: task_id={task_id[:8]}... created, returning", flush=True)
+    asyncio.create_task(_run_pipeline(task_id, text, genre, req.title.strip(), user["username"]))
     return ConvertResponse(task_id=task_id)
 
 
@@ -316,7 +356,8 @@ class RegenerateRequest(BaseModel):
 
 
 @app.post("/api/convert/{task_id}/regenerate")
-async def regenerate(task_id: str, req: RegenerateRequest, user: dict = Depends(_require_auth)):
+@limiter.limit("3/minute")
+async def regenerate(request: Request, task_id: str, req: RegenerateRequest, user: dict = Depends(_require_auth)):
     conv = db_get_conversion(task_id)
     if not conv:
         raise HTTPException(status_code=404, detail="任务不存在")
@@ -391,6 +432,143 @@ async def edit_conversion(task_id: str, req: EditYamlRequest, user: dict = Depen
         "yaml": conv.get("yaml_output", ""),
         "meta": conv.get("meta_json", {}),
     }
+
+
+# --- File Upload ---
+
+@app.post("/api/upload")
+@limiter.limit("10/minute")
+async def upload_file(request: Request, file: UploadFile = File(...), user: dict = Depends(_require_auth)) -> dict[str, str]:
+    ALLOWED_EXTENSIONS = {".txt", ".md", ".text", ".pdf", ".docx", ".doc"}
+    ext = Path(file.filename or "").suffix.lower()
+
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"不支持的文件类型: {ext}，仅支持 {', '.join(sorted(ALLOWED_EXTENSIONS))}")
+
+    content = await file.read()
+    if len(content) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="文件大小不能超过 5MB")
+
+    text = ""
+
+    if ext in {".txt", ".md", ".text"}:
+        try:
+            text = content.decode("utf-8")
+        except UnicodeDecodeError:
+            try:
+                text = content.decode("gbk")
+            except UnicodeDecodeError:
+                raise HTTPException(status_code=400, detail="无法识别文件编码，请使用 UTF-8 或 GBK 编码")
+
+    elif ext == ".pdf":
+        try:
+            from io import BytesIO
+            from PyPDF2 import PdfReader
+            reader = PdfReader(BytesIO(content))
+            parts: list[str] = []
+            for page in reader.pages:
+                page_text = page.extract_text()
+                if page_text:
+                    parts.append(page_text)
+            text = "\n".join(parts)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"PDF 解析失败: {e}")
+
+    elif ext == ".docx":
+        try:
+            from io import BytesIO
+            from docx import Document
+            doc = Document(BytesIO(content))
+            parts: list[str] = []
+            for para in doc.paragraphs:
+                if para.text.strip():
+                    parts.append(para.text)
+            text = "\n".join(parts)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"DOCX 解析失败: {e}")
+
+    elif ext == ".doc":
+        try:
+            from io import BytesIO
+            from docx import Document
+            doc = Document(BytesIO(content))
+            parts: list[str] = []
+            for para in doc.paragraphs:
+                if para.text.strip():
+                    parts.append(para.text)
+            text = "\n".join(parts)
+        except Exception:
+            import re
+            raw = content.decode("utf-8", errors="ignore")
+            chunks = re.findall(r'[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef\w]{4,}', raw)
+            if chunks:
+                text = "\n".join(chunks)
+            else:
+                raise HTTPException(status_code=400, detail="DOC 文件解析失败，请转换为 DOCX 格式后重试")
+
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="文件内容为空或无法提取文本")
+
+    return {"filename": file.filename or "unknown", "text": text}
+
+
+# --- Export ---
+
+@app.get("/api/convert/{task_id}/export/pdf")
+async def export_pdf_endpoint(task_id: str, token: str = ""):
+    _check_auth(token)
+    conv = db_get_conversion(task_id)
+    if not conv or conv.get("status") != "completed":
+        raise HTTPException(status_code=404, detail="转换任务不存在或未完成")
+
+    yaml_str = conv.get("yaml_output", "")
+    if not yaml_str:
+        raise HTTPException(status_code=400, detail="无可用内容")
+
+    try:
+        pdf_bytes = export_pdf(yaml_str)
+    except ExportError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    title = (conv.get("meta_json", {}) or {}).get("title", "script")
+    filename = f"{title}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/api/convert/{task_id}/export/docx")
+async def export_docx_endpoint(task_id: str, token: str = ""):
+    _check_auth(token)
+    conv = db_get_conversion(task_id)
+    if not conv or conv.get("status") != "completed":
+        raise HTTPException(status_code=404, detail="转换任务不存在或未完成")
+
+    yaml_str = conv.get("yaml_output", "")
+    if not yaml_str:
+        raise HTTPException(status_code=400, detail="无可用内容")
+
+    try:
+        docx_bytes = export_docx(yaml_str)
+    except ExportError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    title = (conv.get("meta_json", {}) or {}).get("title", "script")
+    filename = f"{title}.docx"
+    return Response(
+        content=docx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# --- Health ---
+
+@app.get("/api/health")
+async def health() -> dict[str, str]:
+    return {"status": "ok", "version": "0.4.0"}
 
 
 # --- Serve frontend in production ---

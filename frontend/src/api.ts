@@ -110,6 +110,33 @@ export function logout() {
   sessionStorage.removeItem('auth_token');
 }
 
+export async function changePassword(oldPassword: string, newPassword: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/auth/change-password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || '修改密码失败');
+  }
+}
+
+export async function uploadFile(file: File): Promise<{ filename: string; text: string }> {
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await fetch(`${API_BASE}/upload`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: formData,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || '上传失败');
+  }
+  return res.json();
+}
+
 export async function startConversion(text: string, genre: string, title: string): Promise<{ task_id: string }> {
   const res = await fetch(`${API_BASE}/convert`, {
     method: 'POST',

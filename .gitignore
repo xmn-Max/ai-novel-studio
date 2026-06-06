@@ -3,3 +3,9 @@ __pycache__/
 node_modules/
 dist/
 .env
+*.db
+*.db-wal
+*.db-shm
+*.db.bak
+*.db.test_bak
+users.json.bak
