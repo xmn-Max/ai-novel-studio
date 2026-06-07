@@ -158,6 +158,11 @@ ai-novel-studio/
 |------|------|------|
 | POST | `/api/projects/{id}/requery` | 按目标重新生成（script/plot/world/characters） |
 
+### 深度审阅 ★
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/projects/{id}/deep-review` | 对比两版本差异 >30 行后，AI 审阅原文+双版本+用户意见，综合生成新剧本 |
+
 ### 在线编辑
 | 方法 | 路径 | 说明 |
 |------|------|------|
@@ -187,7 +192,26 @@ ai-novel-studio/
 
 ## 修改日志
 
-### v1.2.0（当前版本）
+### v1.3.0（当前版本）
+
+**深度审阅**
+- 版本对比后，若两个版本 YAML 行数差异 > 30 行，自动显示审阅面板
+- 用户填写补充意见后，AI 同时审阅：版本 A YAML + 版本 B YAML + 小说原文 + 用户意见
+- 综合两个版本优点生成新剧本，自动保存为新版本
+- 新增 `POST /api/projects/{id}/deep-review` 端点
+- 新增 `DEEP_REVIEW_PROMPT` 提示词，注入原文 + 双版本摘要 + 反馈
+- VersionHistory YAML 预览改为可展开/收起的折叠式，新增语法高亮
+
+**世界观类型适配**
+- 后端 `WORLD_FIELDS` 字典：6 种小说类型各自定义世界观分析维度
+- 前端 `WorldSection.tsx` 新增 `GENRE_LABELS`：根据类型显示不同栏目名称
+- Pipeline `_build_world()` 根据小说类型注入对应维度描述
+
+**修复**
+- 清除 `pipeline.py` / `App.tsx` 中的 Git 合并冲突标记
+- 删除无用上传文件
+
+### v1.2.0
 
 **AI 重新询问**
 - 新增 `POST /api/projects/{id}/requery` 端点，支持 script/plot/world/characters 四种目标
