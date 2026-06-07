@@ -2,6 +2,10 @@
 
 将小说文本自动转换为结构化剧本（YAML 格式），支持 AI 重新询问、版本历史、在线编辑，让小说作者快速获得可迭代打磨的剧本。
 
+## 演示视频
+
+[观看演示视频](https://pan.baidu.com/s/12HD0hn7fqp48hSaF2QuasA?pwd=pezu)（百度网盘，提取码：pezu）
+
 ## 功能
 
 - **项目化管理**：每部小说一个 Project，所有 AI 分析结果 SQLite 持久化
