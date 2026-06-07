@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { listVersions, getVersion, restoreVersion, VersionItem, VersionSnapshot, saveVersion } from '../api';
+import { listVersions, getVersion, restoreVersion, VersionItem, VersionSnapshot, saveVersion, deepReview } from '../api';
 
 interface Props {
   projectId: string;
@@ -15,6 +15,9 @@ export default function VersionHistory({ projectId, visible, onClose, onRestored
   const [diffData, setDiffData] = useState<{ a: VersionSnapshot | null; b: VersionSnapshot | null }>({ a: null, b: null });
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState('');
+  const [showDeepReview, setShowDeepReview] = useState(false);
+  const [deepFeedback, setDeepFeedback] = useState('');
+  const [deepLoading, setDeepLoading] = useState(false);
 
   const load = async () => {
     try { setVersions(await listVersions(projectId)); } catch { /* ignore */ }
@@ -29,19 +32,51 @@ export default function VersionHistory({ projectId, visible, onClose, onRestored
       return [...prev, id];
     });
     setDiffData({ a: null, b: null });
+    setShowDeepReview(false);
+    setDeepFeedback('');
   };
 
   const handleCompare = async () => {
     if (selected.length !== 2) return;
     setLoading(true);
+    setShowDeepReview(false);
+    setDeepFeedback('');
     try {
       const [a, b] = await Promise.all([
         getVersion(projectId, selected[0]),
         getVersion(projectId, selected[1]),
       ]);
       setDiffData({ a, b });
+
+      const snapA = a.snapshot as Record<string, unknown>;
+      const snapB = b.snapshot as Record<string, unknown>;
+      const yamlA = (typeof snapA?.['yaml_content'] === 'string' ? snapA['yaml_content'] : '') as string;
+      const yamlB = (typeof snapB?.['yaml_content'] === 'string' ? snapB['yaml_content'] : '') as string;
+      const linesA = yamlA ? yamlA.split('\n').length : 0;
+      const linesB = yamlB ? yamlB.split('\n').length : 0;
+      if (Math.abs(linesA - linesB) > 30) {
+        setShowDeepReview(true);
+      }
     } catch { setMsg('获取版本失败'); }
     finally { setLoading(false); }
+  };
+
+  const handleDeepReview = async () => {
+    if (!deepFeedback.trim() || selected.length !== 2) return;
+    setDeepLoading(true);
+    try {
+      const result = await deepReview(projectId, deepFeedback.trim(), selected[0], selected[1]);
+      setMsg(`深度审阅完成: ${result.label}`);
+      setTimeout(() => setMsg(''), 5000);
+      setShowDeepReview(false);
+      setDeepFeedback('');
+      onRestored();
+      await load();
+    } catch (err: unknown) {
+      setMsg(err instanceof Error ? err.message : '深度审阅失败');
+      setTimeout(() => setMsg(''), 5000);
+    }
+    setDeepLoading(false);
   };
 
   const handleRestore = async (versionId: string) => {
@@ -78,8 +113,7 @@ export default function VersionHistory({ projectId, visible, onClose, onRestored
         </div>
 
         <div className="flex-1 flex overflow-hidden">
-          {/* Version list */}
-          <div className="w-64 border-r border-slate-200 overflow-auto p-3 space-y-1">
+          <div className="w-64 border-r border-slate-200 overflow-auto p-3 space-y-1 shrink-0">
             {versions.length === 0 && (
               <p className="text-xs text-slate-400 text-center py-8">暂无版本记录</p>
             )}
@@ -107,7 +141,6 @@ export default function VersionHistory({ projectId, visible, onClose, onRestored
             ))}
           </div>
 
-          {/* Diff view */}
           <div className="flex-1 overflow-auto p-4">
             {!diffData.a ? (
               <div className="text-center text-sm text-slate-400 mt-20">
@@ -121,7 +154,55 @@ export default function VersionHistory({ projectId, visible, onClose, onRestored
                   )}
               </div>
             ) : (
-              <VersionDiff a={diffData.a!} b={diffData.b!} />
+              <>
+                <VersionDiff a={diffData.a!} b={diffData.b!} />
+
+                {showDeepReview && (
+                  <div className="mt-6 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="text-sm font-semibold text-amber-800">
+                        剧本行数差异超过 30 行，是否需要 AI 深度审阅并重新生成？
+                      </h4>
+                      <button
+                        onClick={() => setShowDeepReview(false)}
+                        className="text-amber-500 hover:text-amber-700 text-sm"
+                      >
+                        放弃生成
+                      </button>
+                    </div>
+                    <p className="text-xs text-amber-600 mb-3">
+                      AI 将审视您的补充意见和两个版本的差异，重新阅读原文，综合生成新剧本。新剧本会自动保存为一个新版本。
+                    </p>
+                    <textarea
+                      value={deepFeedback}
+                      onChange={(e) => setDeepFeedback(e.target.value)}
+                      placeholder="请输入补充意见，例如：B版本的场景划分更合理但A版本的对白更自然，请综合两者优点..."
+                      rows={3}
+                      className="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm
+                                 focus:outline-none focus:ring-2 focus:ring-amber-400 resize-y"
+                      disabled={deepLoading}
+                    />
+                    <div className="flex gap-2 mt-3">
+                      <button
+                        onClick={handleDeepReview}
+                        disabled={deepLoading || !deepFeedback.trim()}
+                        className="px-4 py-2 bg-amber-600 text-white text-sm font-medium rounded-lg
+                                   hover:bg-amber-700 disabled:opacity-50 transition-colors"
+                      >
+                        {deepLoading ? '正在审阅并生成...' : 'AI 深度审阅并生成新剧本'}
+                      </button>
+                      <button
+                        onClick={() => { setShowDeepReview(false); setDeepFeedback(''); }}
+                        disabled={deepLoading}
+                        className="px-4 py-2 text-sm text-slate-500 border border-slate-300 rounded-lg
+                                   hover:bg-slate-50 disabled:opacity-50 transition-colors"
+                      >
+                        取消
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -133,6 +214,11 @@ export default function VersionHistory({ projectId, visible, onClose, onRestored
 function VersionDiff({ a, b }: { a: VersionSnapshot; b: VersionSnapshot }) {
   const snapA = a.snapshot as Record<string, unknown>;
   const snapB = b.snapshot as Record<string, unknown>;
+
+  const yamlA = (typeof snapA?.['yaml_content'] === 'string' ? snapA['yaml_content'] : '') as string;
+  const yamlB = (typeof snapB?.['yaml_content'] === 'string' ? snapB['yaml_content'] : '') as string;
+
+  const [showYamlPreview, setShowYamlPreview] = useState(false);
 
   const sections: Array<{ key: string; label: string; render: (val: unknown) => string }> = [
     {
@@ -157,16 +243,6 @@ function VersionDiff({ a, b }: { a: VersionSnapshot; b: VersionSnapshot }) {
     {
       key: 'script_scenes', label: '剧本场景',
       render: (val) => `${(val as Array<unknown>)?.length || 0} 个场景`,
-    },
-    {
-      key: 'yaml_content', label: 'YAML 剧本',
-      render: (val) => {
-        const s = typeof val === 'string' ? val : '';
-        if (!s) return '—';
-        const lines = s.split('\n').length;
-        const size = (s.length / 1024).toFixed(1);
-        return `${lines} 行, ${size} KB`;
-      },
     },
   ];
 
@@ -200,6 +276,79 @@ function VersionDiff({ a, b }: { a: VersionSnapshot; b: VersionSnapshot }) {
           </div>
         );
       })}
+
+      {/* YAML section with preview toggle */}
+      <div className="rounded-lg border border-slate-200 p-3">
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-slate-700">YAML 剧本</span>
+            {(() => {
+              const linesA = yamlA ? yamlA.split('\n').length : 0;
+              const linesB = yamlB ? yamlB.split('\n').length : 0;
+              if (linesA !== linesB) {
+                return <span className="text-xs px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded">有差异</span>;
+              }
+              return null;
+            })()}
+          </div>
+          <button
+            onClick={() => setShowYamlPreview(!showYamlPreview)}
+            className="text-xs text-indigo-600 hover:text-indigo-700 font-medium"
+          >
+            {showYamlPreview ? '收起预览' : '展开 YAML 预览'}
+          </button>
+        </div>
+        <div className="grid grid-cols-2 gap-3 text-xs">
+          <div className="p-2 rounded bg-slate-50 text-slate-600">
+            {yamlA ? `${yamlA.split('\n').length} 行, ${(yamlA.length / 1024).toFixed(1)} KB` : '—'}
+          </div>
+          <div className="p-2 rounded bg-slate-50 text-slate-600">
+            {yamlB ? `${yamlB.split('\n').length} 行, ${(yamlB.length / 1024).toFixed(1)} KB` : '—'}
+          </div>
+        </div>
+
+        {showYamlPreview && (
+          <div className="mt-3 grid grid-cols-2 gap-3">
+            <div>
+              <div className="text-xs text-slate-500 mb-1">版本 A YAML</div>
+              <pre className="bg-slate-900 text-xs leading-relaxed p-3 rounded-lg max-h-[500px] overflow-auto font-mono">
+                {yamlA ? highlightYaml(yamlA) : <span className="text-slate-500">暂无内容</span>}
+              </pre>
+            </div>
+            <div>
+              <div className="text-xs text-slate-500 mb-1">版本 B YAML</div>
+              <pre className="bg-slate-900 text-xs leading-relaxed p-3 rounded-lg max-h-[500px] overflow-auto font-mono">
+                {yamlB ? highlightYaml(yamlB) : <span className="text-slate-500">暂无内容</span>}
+              </pre>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
+}
+
+function highlightYaml(yaml: string) {
+  return yaml.split('\n').map((line, i) => {
+    const trimmed = line.trimStart();
+    let color = 'text-slate-400';
+    if (trimmed.startsWith('#')) {
+      color = 'text-slate-500 italic';
+    } else if (trimmed.startsWith('- ') || trimmed.startsWith('  - ')) {
+      color = 'text-indigo-400';
+    } else if (trimmed.includes(':')) {
+      const keyPart = trimmed.split(':')[0];
+      if (keyPart.match(/^[\w\u4e00-\u9fff]+$/)) {
+        color = 'text-emerald-400';
+      }
+    }
+    return (
+      <div key={i} className="flex">
+        <span className="select-none text-slate-600 w-8 text-right pr-2 shrink-0 text-[10px] leading-5">
+          {i + 1}
+        </span>
+        <span className={`${color} whitespace-pre-wrap break-all leading-5`}>{line || ' '}</span>
+      </div>
+    );
+  });
 }

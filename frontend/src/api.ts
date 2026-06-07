@@ -443,3 +443,14 @@ export async function requerySection(
   });
   return handleResponse(res);
 }
+
+export async function deepReview(
+  projectId: string, feedback: string, versionAId: string, versionBId: string,
+): Promise<{ version_id: string; label: string; scenes: unknown[]; yaml: string }> {
+  const res = await fetch(`${API_BASE}/projects/${projectId}/deep-review`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ feedback, version_a_id: versionAId, version_b_id: versionBId }),
+  });
+  return handleResponse(res);
+}

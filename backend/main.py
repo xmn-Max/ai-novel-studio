@@ -457,6 +457,29 @@ async def requery_section(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+class DeepReviewRequest(BaseModel):
+    feedback: str
+    version_a_id: str
+    version_b_id: str
+
+
+@app.post("/api/projects/{project_id}/deep-review")
+async def deep_review(
+    project_id: str,
+    req: DeepReviewRequest,
+    user: dict = Depends(_require_auth),
+) -> dict[str, Any]:
+    if not req.feedback.strip():
+        raise HTTPException(status_code=400, detail="请输入补充意见")
+    if not req.version_a_id or not req.version_b_id:
+        raise HTTPException(status_code=400, detail="请指定两个版本")
+    try:
+        result = await service.deep_review(project_id, user["username"], req.feedback.strip(), req.version_a_id, req.version_b_id)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @app.get("/api/plugins")
 async def list_plugins() -> list[dict[str, str]]:
     return get_available_plugins()

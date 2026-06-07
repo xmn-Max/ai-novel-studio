@@ -160,6 +160,27 @@ class Pipeline:
                 s["scene_id"] = i + 1
         return scenes
 
+    async def deep_review_and_regenerate(
+        self, feedback: str, original_text: str, characters: list[dict[str, Any]],
+        version_a_yaml: str, version_b_yaml: str,
+    ) -> list[dict[str, Any]]:
+        char_names = json.dumps([c.get("name", "") for c in characters], ensure_ascii=False)
+        prompt = prompts.DEEP_REVIEW_PROMPT.format(
+            genre_guidance=self.genre_guidance,
+            characters=char_names,
+            original_text=original_text[:4000],
+            version_a_summary=version_a_yaml[:3000],
+            version_b_summary=version_b_yaml[:3000],
+            feedback=feedback,
+        )
+        result = await call_llm(self.client, self.model, prompt, feedback)
+        data = parse_json_object(result)
+        scenes = data.get("scenes", []) if data else []
+        for i, s in enumerate(scenes):
+            if not s.get("scene_id"):
+                s["scene_id"] = i + 1
+        return scenes
+
     async def requery_plot(self, feedback: str, current_plot: dict[str, Any], characters: list[dict[str, Any]]) -> dict[str, Any]:
         char_names = json.dumps([c.get("name", "") for c in characters], ensure_ascii=False)
         prompt = prompts.REQUERY_PLOT_PROMPT.format(

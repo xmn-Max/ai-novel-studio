@@ -470,3 +470,103 @@ class ProjectService:
 
         logger.info("Requery section '%s' for project %s with feedback: %s", target, project_id, feedback[:100])
         return result
+
+    async def deep_review(
+        self, project_id: str, username: str, feedback: str,
+        version_a_id: str, version_b_id: str,
+    ) -> dict[str, Any]:
+        import yaml as yaml_lib
+        from database import rows_to_list
+
+        async with db_session() as db:
+            row = await db.execute(
+                "SELECT genre, user_id FROM projects WHERE id = ?", (project_id,))
+            proj = await row.fetchone()
+            if not proj or proj["user_id"] != username:
+                raise ValueError("项目不存在")
+            genre = proj["genre"]
+
+            char_cursor = await db.execute(
+                "SELECT * FROM project_characters WHERE project_id = ?", (project_id,))
+            characters = rows_to_list(await char_cursor.fetchall())
+
+            ch_cursor = await db.execute(
+                "SELECT content FROM novel_chapters WHERE project_id = ? ORDER BY index_num LIMIT 15", (project_id,))
+            chapter_rows = await ch_cursor.fetchall()
+            original_text = "\n\n".join([r["content"] for r in chapter_rows if r["content"]])[:8000]
+
+            va = await (await db.execute(
+                "SELECT snapshot FROM project_versions WHERE project_id = ? AND id = ?",
+                (project_id, version_a_id))).fetchone()
+            vb = await (await db.execute(
+                "SELECT snapshot FROM project_versions WHERE project_id = ? AND id = ?",
+                (project_id, version_b_id))).fetchone()
+            if not va or not vb:
+                raise ValueError("版本不存在")
+
+            snap_a = json.loads(va["snapshot"])
+            snap_b = json.loads(vb["snapshot"])
+            yaml_a = snap_a.get("yaml_content", "")[:5000]
+            yaml_b = snap_b.get("yaml_content", "")[:5000]
+
+        api_key = os.environ.get("DEEPSEEK_API_KEY", "")
+        pipeline = Pipeline(api_key=api_key, genre=genre)
+
+        scenes = await pipeline.deep_review_and_regenerate(
+            feedback, original_text, characters, yaml_a, yaml_b)
+
+        new_yaml = yaml_lib.dump(
+            {"meta": {"title": "深度审阅剧本", "deep_review_at": datetime.now().isoformat(), "feedback": feedback},
+             "script": scenes},
+            allow_unicode=True, default_flow_style=False, sort_keys=False)
+
+        async with db_session() as db:
+            await db.execute("DELETE FROM script_scenes WHERE project_id = ?", (project_id,))
+            for s in scenes:
+                await db.execute(
+                    "INSERT INTO script_scenes (project_id, scene_id, scene_heading, location, time_of_day, characters_present, action, dialogues, transition) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (project_id, s.get("scene_id", 0), s.get("scene_heading", ""),
+                     s.get("location", ""), s.get("time_of_day", ""),
+                     json.dumps(s.get("characters_present", []), ensure_ascii=False),
+                     json.dumps(s.get("action", []), ensure_ascii=False),
+                     json.dumps(s.get("dialogues", []), ensure_ascii=False),
+                     s.get("transition", "")))
+
+            await db.execute("DELETE FROM project_yaml WHERE project_id = ?", (project_id,))
+            await db.execute(
+                "INSERT INTO project_yaml (project_id, yaml_content, schema_validation, validation_result) VALUES (?, ?, ?, ?)",
+                (project_id, new_yaml, "{}", "{}"))
+
+            count_row = await (await db.execute(
+                "SELECT COUNT(*) FROM project_versions WHERE project_id = ?", (project_id,))).fetchone()
+            count = count_row[0] if count_row else 0
+            if count >= 10:
+                await db.execute(
+                    "DELETE FROM project_versions WHERE id = (SELECT id FROM project_versions WHERE project_id = ? ORDER BY timestamp_ms ASC LIMIT 1)",
+                    (project_id,))
+
+            now = datetime.now()
+            version_id = f"V{now.strftime('%y%m%d%H%M%S')}"
+            label = f"V{count + 1} - 深度审阅 - {now.strftime('%Y-%m-%d %H:%M:%S')}"
+
+            snapshot = json.dumps({
+                "characters": characters,
+                "plot": {},
+                "events": [],
+                "scene_plan": [],
+                "script_scenes": scenes,
+                "yaml_content": new_yaml,
+                "world_building": None,
+            }, ensure_ascii=False)
+
+            ts_ms = int(now.timestamp() * 1000)
+            await db.execute(
+                "INSERT INTO project_versions (id, project_id, label, timestamp_ms, feedback, snapshot) VALUES (?, ?, ?, ?, ?, ?)",
+                (version_id, project_id, label, ts_ms, feedback, snapshot))
+
+            await db.execute("UPDATE projects SET state = ?, updated_at = ? WHERE id = ?",
+                             ("COMPLETED", now.isoformat(), project_id))
+            await db.commit()
+
+        logger.info("Deep review complete for project %s, new version: %s", project_id, version_id)
+        return {"version_id": version_id, "label": label, "scenes": scenes, "yaml": new_yaml}
