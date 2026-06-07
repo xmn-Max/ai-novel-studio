@@ -12,14 +12,14 @@
 - **剧情分析**：AI 提取主线、支线、主题、冲突、高潮、结局、关键事件、叙事节奏；支持行内编辑
 - **角色分析**：AI 提取角色姓名/性别/年龄/人设/性格特征/关系；支持行内编辑
 - **场景规划**：事件→场景映射、冲突强度、时长；支持行内编辑
-- **世界观分析**：AI 归纳界域/势力/功法/法宝/时间线/规则
+- **世界观分析**：6 维度（地点/势力/技能/物品/时间线/规则），每种类型有专属标签和 AI 分析视角
 - **AI 自动修复**：Schema 校验不通过时自动调用 AI 修复（最多 3 次重试）
 - **剧本查看 & 在线编辑**：结构化展示场景标题/地点/时间/角色/动作/对白/转场，支持编辑每个场景字段
 - **实时进度**：SSE 推送 8 步流水线进度
 - **插件系统**：编剧点评（三幕式/节奏/角色弧光/对白评价）、爆款分析（爆点/标题/钩子/高光场景）
 - **YAML 预览 + 下载**
-- **深度审阅**：版本对比行数差 > 30 行时触发，AI 审阅原文 + 两版 YAML + 用户意见，综合生成新剧本
-- **小说类型系统**：6 种内置类型 + 用户自定义类型（最多 10 个），每种有独立 AI 分析指引和世界观维度
+- **小说类型系统**：6 种内置类型（每种有独立 AI 分析视角：叙事看人生、玄幻看成长、科幻看思想、言情看感情、魔幻看世界、武侠看侠义）+ 用户可自定义最多 10 个类型
+- **在线编辑**：角色/剧情/场景规划/剧本场景均支持行内编辑，修改直接持久化
 
 ## 技术栈
 
@@ -33,7 +33,25 @@
 
 ## 快速开始
 
-### 1. 安装依赖
+### 方式一：Docker（推荐）
+
+前提：安装 [Docker Desktop](https://www.docker.com/products/docker-desktop/)。
+
+```bash
+# 1. 设置 API Key（PowerShell）
+$env:DEEPSEEK_API_KEY = "你的API密钥"
+
+# 2. 构建并启动
+docker compose up -d --build
+
+# 3. 浏览器打开 http://localhost:8000
+```
+
+数据持久化在 `./data/` 目录，容器重建不丢失。卸载项目时删除该目录即可。
+
+### 方式二：手动启动
+
+#### 1. 安装依赖
 
 ```bash
 # 后端
@@ -44,7 +62,7 @@ cd frontend
 npm install
 ```
 
-### 2. 配置环境变量
+#### 2. 配置环境变量
 
 在 `backend/` 目录下创建 `.env` 文件：
 
@@ -52,11 +70,12 @@ npm install
 DEEPSEEK_API_KEY=你的API密钥
 ```
 
-### 3. 启动服务
+#### 3. 启动服务
 
 ```bash
 # 终端 1：启动后端
-python backend/run.py
+cd backend
+python run.py
 
 # 终端 2：启动前端
 cd frontend
@@ -73,7 +92,7 @@ ai-novel-studio/
 │   ├── main.py                      # FastAPI 路由（31 个端点）
 │   ├── models.py                    # Pydantic 数据模型
 │   ├── pipeline.py                  # 8 步 AI 流水线 + 重新询问
-│   ├── prompts.py                   # LLM Prompt 模板（15 个）
+│   ├── prompts.py                   # LLM Prompt 模板（13 个）
 │   ├── plugins.py                   # 插件系统（编剧点评/爆款分析）
 │   ├── services/
 │   │   └── project_service.py       # 业务逻辑层
@@ -88,7 +107,7 @@ ai-novel-studio/
 ├── frontend/
 │   └── src/
 │       ├── App.tsx                  # 路由入口
-│   ├── api.ts                   # API 客户端（33 个函数）
+│       ├── api.ts                   # API 客户端（32 个函数）
 │       ├── main.tsx
 │       └── components/
 │           ├── LoginPage.tsx         # 登录/注册
@@ -158,11 +177,6 @@ ai-novel-studio/
 |------|------|------|
 | POST | `/api/projects/{id}/requery` | 按目标重新生成（script/plot/world/characters） |
 
-### 深度审阅 ★
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/api/projects/{id}/deep-review` | 对比两版本差异 >30 行后，AI 审阅原文+双版本+用户意见，综合生成新剧本 |
-
 ### 在线编辑
 | 方法 | 路径 | 说明 |
 |------|------|------|
@@ -194,22 +208,31 @@ ai-novel-studio/
 
 ### v1.3.0（当前版本）
 
-**深度审阅**
-- 版本对比后，若两个版本 YAML 行数差异 > 30 行，自动显示审阅面板
-- 用户填写补充意见后，AI 同时审阅：版本 A YAML + 版本 B YAML + 小说原文 + 用户意见
-- 综合两个版本优点生成新剧本，自动保存为新版本
-- 新增 `POST /api/projects/{id}/deep-review` 端点
-- 新增 `DEEP_REVIEW_PROMPT` 提示词，注入原文 + 双版本摘要 + 反馈
-- VersionHistory YAML 预览改为可展开/收起的折叠式，新增语法高亮
+**Docker 部署**
+- 新增多阶段 Dockerfile（Node 编译前端 + Python 运行后端合一）
+- 新增 `docker-compose.yml`，一键 `docker compose up -d --build` 启动
+- 数据持久化至 `./data/` 目录（数据库、用户信息）
+- `database.py` / `auth.py` 支持 `DATA_DIR` 环境变量配置路径
 
-**世界观类型适配**
-- 后端 `WORLD_FIELDS` 字典：6 种小说类型各自定义世界观分析维度
-- 前端 `WorldSection.tsx` 新增 `GENRE_LABELS`：根据类型显示不同栏目名称
-- Pipeline `_build_world()` 根据小说类型注入对应维度描述
+**版本对比增强**
+- 版本对比新增 YAML 预览（语法着色、暗色终端风格、左右并排）
+- 新增深度审阅"看栏目"：对比后发现 YAML 行数差 > 30 自动提示，填写意见后 AI 综合两版本 + 原文重新生成新剧本
+- 新增 `POST /api/projects/{id}/deep-review` 端点
+- 新增 `DEEP_REVIEW_PROMPT` 和 `Pipeline.deep_review_and_regenerate()` 方法
+
+**类型系统深化 — "看"框架**
+- 6 种类型各有明确分析视角：叙事看人生、玄幻看成长、科幻看思想、言情看感情、魔幻看世界、武侠看侠义
+- 每种类型的 genre_guidance 细化为角色/剧情/世界观/场景四个维度的针对性指引
+- 世界观 6 维度支持按类型显示不同标签和 AI 分析字段（如叙事用"地点/环境、人物/群体、能力/经历..."，玄幻用"界域/地点、势力/宗门、功法/技能..."）
+
+**世界观维度按类型适配**
+- `prompts.py` 新增 `WORLD_FIELDS` 字典（6 种类型 × 6 维度专属描述），`WORLD_BUILDING_PROMPT` 改用 `{world_fields}` 动态注入
+- `pipeline.py` 的 `_build_world` 根据 genre 选择对应维度描述
+- 前端 `WorldSection.tsx` 新增 `GENRE_LABELS` 映射，按类型渲染不同标签
 
 **修复**
-- 清除 `pipeline.py` / `App.tsx` 中的 Git 合并冲突标记
-- 删除无用上传文件
+- 清理所有 Git 合并冲突标记（8 个文件共 25 处）
+- 升级 bcrypt 至 5.0.0，python-dotenv 至 1.2.2
 
 ### v1.2.0
 
