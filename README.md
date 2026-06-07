@@ -50,6 +50,7 @@ docker compose up -d --build
 数据持久化在 `./data/` 目录，容器重建不丢失。卸载项目时删除该目录即可。
 
 ### 方式二：手动启动
+$env:DEEPSEEK_API_KEY = "你的API密钥"
 
 #### 1. 安装依赖
 

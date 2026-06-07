@@ -100,7 +100,7 @@ export default function ScriptViewer({ scenes, projectId, onUpdate }: Props) {
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-mono text-indigo-500">S{scene.scene_id}</span>
                   <span className="text-sm font-medium text-slate-800">
-                    {scene.location || '未指定地点'}
+                    {scene.scene_heading || scene.location || '未指定地点'}
                   </span>
                   <span className="text-xs text-slate-400">{scene.time_of_day}</span>
                   {scene.characters_present?.length > 0 && (

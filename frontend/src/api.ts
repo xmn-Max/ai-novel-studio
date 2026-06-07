@@ -93,7 +93,7 @@ export interface GenreItem {
 const API_BASE = '/api';
 
 function getToken(): string {
-  return localStorage.getItem('auth_token') || '';
+  return sessionStorage.getItem('auth_token') || '';
 }
 
 function authHeaders(): Record<string, string> {
@@ -124,7 +124,7 @@ export async function register(username: string, password: string): Promise<Auth
     body: JSON.stringify({ username, password }),
   });
   const data = await handleResponse<AuthUser>(res);
-  localStorage.setItem('auth_token', data.token);
+  sessionStorage.setItem('auth_token', data.token);
   return data;
 }
 
@@ -135,7 +135,7 @@ export async function login(username: string, password: string): Promise<AuthUse
     body: JSON.stringify({ username, password }),
   });
   const data = await handleResponse<AuthUser>(res);
-  localStorage.setItem('auth_token', data.token);
+  sessionStorage.setItem('auth_token', data.token);
   return data;
 }
 
@@ -146,13 +146,13 @@ export async function fetchCurrentUser(): Promise<{ username: string } | null> {
     const res = await fetch(`${API_BASE}/auth/me`, { headers: authHeaders() });
     return await handleResponse<{ username: string }>(res);
   } catch {
-    localStorage.removeItem('auth_token');
+    sessionStorage.removeItem('auth_token');
     return null;
   }
 }
 
 export function logout() {
-  localStorage.removeItem('auth_token');
+  sessionStorage.removeItem('auth_token');
 }
 
 // Projects
