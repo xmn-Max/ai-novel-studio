@@ -254,7 +254,7 @@ class TestModels(unittest.TestCase):
 class TestDatabase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        from database import DB_PATH, get_db
+        from database import DB_PATH, get_auth_db
 
         cls._real_db = DB_PATH
         cls._test_db = DB_PATH.parent / "app_test.db"
@@ -270,9 +270,9 @@ class TestDatabase(unittest.TestCase):
             if p.exists():
                 p.unlink()
 
-        from database import init_db
+        from database import init_auth_db
 
-        init_db()
+        init_auth_db()
 
     @classmethod
     def tearDownClass(cls):
@@ -292,9 +292,9 @@ class TestDatabase(unittest.TestCase):
         self._clean_db()
 
     def _clean_db(self):
-        from database import get_db
+        from database import get_auth_db
 
-        conn = get_db()
+        conn = get_auth_db()
         conn.execute("DELETE FROM conversions")
         conn.execute("DELETE FROM genres WHERE is_system=0")
         conn.execute("DELETE FROM users")

@@ -11,7 +11,7 @@ GENRES_JSON = Path(__file__).parent / "genres.json"
 USERS_JSON = Path(__file__).parent / "users.json"
 
 
-def get_db() -> sqlite3.Connection:
+def _get_auth_db() -> sqlite3.Connection:
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
@@ -19,8 +19,11 @@ def get_db() -> sqlite3.Connection:
     return conn
 
 
-def init_db() -> None:
-    conn = get_db()
+get_auth_db = _get_auth_db  # kept for backward compatibility with tests
+
+
+def init_auth_db() -> None:
+    conn = _get_auth_db()
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -66,7 +69,7 @@ def init_db() -> None:
 
 
 def _seed_system_genres() -> None:
-    conn = get_db()
+    conn = _get_auth_db()
     row = conn.execute("SELECT COUNT(*) as cnt FROM genres WHERE is_system=1").fetchone()
     if row["cnt"] > 0:
         conn.close()
@@ -102,7 +105,7 @@ def _migrate_users_if_needed() -> None:
     if not USERS_JSON.exists():
         return
 
-    conn = get_db()
+    conn = _get_auth_db()
     row = conn.execute("SELECT COUNT(*) as cnt FROM users").fetchone()
     if row["cnt"] > 0:
         # Check if migration already done
@@ -158,7 +161,7 @@ def _migrate_users_if_needed() -> None:
 # ── User operations ──
 
 def db_create_user(username: str, password_hash: str, token: str) -> dict[str, str]:
-    conn = get_db()
+    conn = _get_auth_db()
     now = datetime.now().isoformat()
     try:
         conn.execute(
@@ -174,7 +177,7 @@ def db_create_user(username: str, password_hash: str, token: str) -> dict[str, s
 
 
 def db_get_user_by_username(username: str) -> Optional[dict[str, Any]]:
-    conn = get_db()
+    conn = _get_auth_db()
     row = conn.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
     conn.close()
     if row:
@@ -185,7 +188,7 @@ def db_get_user_by_username(username: str) -> Optional[dict[str, Any]]:
 def db_get_user_by_token(token: str) -> Optional[dict[str, Any]]:
     if not token:
         return None
-    conn = get_db()
+    conn = _get_auth_db()
     row = conn.execute("SELECT * FROM users WHERE token=?", (token,)).fetchone()
     conn.close()
     if row:
@@ -194,7 +197,7 @@ def db_get_user_by_token(token: str) -> Optional[dict[str, Any]]:
 
 
 def db_update_user_token(username: str, token: str) -> None:
-    conn = get_db()
+    conn = _get_auth_db()
     conn.execute("UPDATE users SET token=? WHERE username=?", (token, username))
     conn.commit()
     conn.close()
@@ -203,7 +206,7 @@ def db_update_user_token(username: str, token: str) -> None:
 # ── Genre operations ──
 
 def db_get_system_genres() -> list[dict[str, Any]]:
-    conn = get_db()
+    conn = _get_auth_db()
     rows = conn.execute("SELECT * FROM genres WHERE is_system=1 ORDER BY id").fetchall()
     conn.close()
     result: list[dict[str, Any]] = []
@@ -218,7 +221,7 @@ def db_get_system_genres() -> list[dict[str, Any]]:
 
 
 def db_get_user_genres(username: str) -> list[dict[str, Any]]:
-    conn = get_db()
+    conn = _get_auth_db()
     rows = conn.execute(
         "SELECT * FROM genres WHERE is_system=0 AND username=? ORDER BY id", (username,)
     ).fetchall()
@@ -235,7 +238,7 @@ def db_get_user_genres(username: str) -> list[dict[str, Any]]:
 
 
 def db_count_user_genres(username: str) -> int:
-    conn = get_db()
+    conn = _get_auth_db()
     row = conn.execute(
         "SELECT COUNT(*) as cnt FROM genres WHERE is_system=0 AND username=?", (username,)
     ).fetchone()
@@ -244,7 +247,7 @@ def db_count_user_genres(username: str) -> int:
 
 
 def db_add_user_genre(username: str, name: str, guidance: str, keywords: list[str]) -> dict[str, Any]:
-    conn = get_db()
+    conn = _get_auth_db()
     existing = conn.execute(
         "SELECT id FROM genres WHERE name=? AND (is_system=1 OR (is_system=0 AND username=?))",
         (name, username),
@@ -264,7 +267,7 @@ def db_add_user_genre(username: str, name: str, guidance: str, keywords: list[st
 
 
 def db_update_user_genre(username: str, index: int, name: str, guidance: str, keywords: list[str]) -> dict[str, Any]:
-    conn = get_db()
+    conn = _get_auth_db()
     rows = conn.execute(
         "SELECT id, name FROM genres WHERE is_system=0 AND username=? ORDER BY id", (username,)
     ).fetchall()
@@ -284,7 +287,7 @@ def db_update_user_genre(username: str, index: int, name: str, guidance: str, ke
 
 
 def db_delete_user_genre(username: str, index: int) -> str:
-    conn = get_db()
+    conn = _get_auth_db()
     rows = conn.execute(
         "SELECT id, name FROM genres WHERE is_system=0 AND username=? ORDER BY id", (username,)
     ).fetchall()
@@ -309,7 +312,7 @@ def db_create_conversion(
     genre: str,
     title: str,
 ) -> None:
-    conn = get_db()
+    conn = _get_auth_db()
     now = datetime.now().isoformat()
     conn.execute(
         """INSERT INTO conversions (id, username, title, genre, original_text, status, progress_json, created_at, updated_at)
@@ -321,7 +324,7 @@ def db_create_conversion(
 
 
 def db_update_conversion_progress(task_id: str, progress: dict[str, Any]) -> None:
-    conn = get_db()
+    conn = _get_auth_db()
     now = datetime.now().isoformat()
     conn.execute(
         "UPDATE conversions SET progress_json=?, updated_at=? WHERE id=?",
@@ -332,7 +335,7 @@ def db_update_conversion_progress(task_id: str, progress: dict[str, Any]) -> Non
 
 
 def db_update_conversion_status(task_id: str, status: str, error: str = "") -> None:
-    conn = get_db()
+    conn = _get_auth_db()
     now = datetime.now().isoformat()
     conn.execute(
         "UPDATE conversions SET status=?, error=?, updated_at=? WHERE id=?",
@@ -349,7 +352,7 @@ def db_save_conversion_result(
     intermediate_json: str,
     cleaned_text: str,
 ) -> None:
-    conn = get_db()
+    conn = _get_auth_db()
     now = datetime.now().isoformat()
     conn.execute(
         """UPDATE conversions
@@ -363,7 +366,7 @@ def db_save_conversion_result(
 
 
 def db_get_conversion(task_id: str) -> Optional[dict[str, Any]]:
-    conn = get_db()
+    conn = _get_auth_db()
     row = conn.execute("SELECT * FROM conversions WHERE id=?", (task_id,)).fetchone()
     conn.close()
     if row:
@@ -379,7 +382,7 @@ def db_get_conversion(task_id: str) -> Optional[dict[str, Any]]:
 
 
 def db_list_conversions(username: str, limit: int = 50) -> list[dict[str, Any]]:
-    conn = get_db()
+    conn = _get_auth_db()
     rows = conn.execute(
         "SELECT id, title, genre, status, created_at, updated_at FROM conversions WHERE username=? ORDER BY updated_at DESC LIMIT ?",
         (username, limit),
@@ -389,7 +392,7 @@ def db_list_conversions(username: str, limit: int = 50) -> list[dict[str, Any]]:
 
 
 def db_delete_conversion(task_id: str, username: str) -> bool:
-    conn = get_db()
+    conn = _get_auth_db()
     cur = conn.execute("DELETE FROM conversions WHERE id=? AND username=?", (task_id, username))
     conn.commit()
     deleted = cur.rowcount > 0
@@ -398,7 +401,7 @@ def db_delete_conversion(task_id: str, username: str) -> bool:
 
 
 def db_update_conversion_yaml(task_id: str, yaml_output: str, username: str) -> bool:
-    conn = get_db()
+    conn = _get_auth_db()
     now = datetime.now().isoformat()
     cur = conn.execute(
         "UPDATE conversions SET yaml_output=?, updated_at=? WHERE id=? AND username=?",
@@ -408,3 +411,165 @@ def db_update_conversion_yaml(task_id: str, yaml_output: str, username: str) -> 
     updated = cur.rowcount > 0
     conn.close()
     return updated
+
+
+# ── Async project database ──
+
+from contextlib import asynccontextmanager
+from typing import AsyncIterator
+
+import aiosqlite
+
+DB_FILE = Path(__file__).parent / "projects.db"
+
+
+async def get_db() -> aiosqlite.Connection:
+    db = await aiosqlite.connect(str(DB_FILE))
+    db.row_factory = aiosqlite.Row
+    await db.execute("PRAGMA journal_mode=WAL")
+    await db.execute("PRAGMA foreign_keys=ON")
+    return db
+
+
+@asynccontextmanager
+async def db_session() -> AsyncIterator[Any]:
+    db = await get_db()
+    try:
+        yield db
+    finally:
+        await db.close()
+
+
+async def init_db() -> None:
+    init_auth_db()
+    db = await get_db()
+    try:
+        await db.executescript("""
+        CREATE TABLE IF NOT EXISTS projects (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            title TEXT NOT NULL DEFAULT '未命名',
+            genre TEXT DEFAULT '叙事',
+            state TEXT DEFAULT 'IDLE',
+            word_count INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS novel_chapters (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id TEXT NOT NULL,
+            index_num INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            content TEXT NOT NULL,
+            word_count INTEGER DEFAULT 0,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS project_characters (
+            id TEXT NOT NULL,
+            project_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            gender TEXT DEFAULT '',
+            age TEXT DEFAULT '',
+            role TEXT DEFAULT '',
+            traits TEXT DEFAULT '[]',
+            description TEXT DEFAULT '',
+            aliases TEXT DEFAULT '[]',
+            relationships TEXT DEFAULT '[]',
+            PRIMARY KEY (project_id, id),
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS plot_analysis (
+            project_id TEXT PRIMARY KEY,
+            theme TEXT DEFAULT '',
+            conflict TEXT DEFAULT '',
+            climax TEXT DEFAULT '',
+            ending TEXT DEFAULT '',
+            main_line TEXT DEFAULT '',
+            sub_lines TEXT DEFAULT '[]',
+            events TEXT DEFAULT '[]',
+            pacing TEXT DEFAULT '',
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS scene_plan (
+            id TEXT NOT NULL,
+            project_id TEXT NOT NULL,
+            scene_id TEXT NOT NULL,
+            purpose TEXT DEFAULT '',
+            location TEXT DEFAULT '',
+            time_of_day TEXT DEFAULT '',
+            event_refs TEXT DEFAULT '[]',
+            conflict_level TEXT DEFAULT '',
+            PRIMARY KEY (project_id, id),
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS script_scenes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id TEXT NOT NULL,
+            scene_id INTEGER NOT NULL,
+            scene_heading TEXT DEFAULT '',
+            location TEXT DEFAULT '',
+            time_of_day TEXT DEFAULT '',
+            characters_present TEXT DEFAULT '[]',
+            action TEXT DEFAULT '[]',
+            dialogues TEXT DEFAULT '[]',
+            transition TEXT DEFAULT '',
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS world_building (
+            project_id TEXT PRIMARY KEY,
+            realms TEXT DEFAULT '[]',
+            factions TEXT DEFAULT '[]',
+            techniques TEXT DEFAULT '[]',
+            items TEXT DEFAULT '[]',
+            timeline TEXT DEFAULT '[]',
+            rules TEXT DEFAULT '[]',
+            raw TEXT DEFAULT '{}',
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS plugin_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id TEXT NOT NULL,
+            plugin_name TEXT NOT NULL,
+            result_data TEXT DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS project_yaml (
+            project_id TEXT PRIMARY KEY,
+            yaml_content TEXT DEFAULT '',
+            schema_validation TEXT DEFAULT '{}',
+            validation_result TEXT DEFAULT '{}',
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS project_versions (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            label TEXT NOT NULL,
+            timestamp_ms INTEGER NOT NULL,
+            feedback TEXT DEFAULT '',
+            snapshot TEXT NOT NULL,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+        """)
+        await db.commit()
+    finally:
+        await db.close()
+
+
+def row_to_dict(row: aiosqlite.Row | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    return dict(row)
+
+
+def rows_to_list(rows: list[aiosqlite.Row]) -> list[dict[str, Any]]:
+    return [dict(r) for r in rows]
