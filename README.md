@@ -4,7 +4,8 @@
 
 ## 演示视频
 
-[观看演示视频](https://pan.baidu.com/s/12HD0hn7fqp48hSaF2QuasA?pwd=pezu)（百度网盘，提取码：pezu）
+- [百度网盘（提取码：pezu）](https://pan.baidu.com/s/12HD0hn7fqp48hSaF2QuasA?pwd=pezu)
+- [哔哩哔哩 (bilibili)](https://b23.tv/s7IPMCS)
 
 ## 功能
 
