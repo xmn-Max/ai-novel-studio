@@ -236,7 +236,7 @@ export default function ProjectPage({ projectId, onBack }: Props) {
           onOpenFeedback={(prefill: string) => openFeedback(prefill, 'plot')}
         />
 
-        <WorldSection wb={wb} isComplete={isComplete} onReAnalyze={() => openFeedback('请改进世界观分析：', 'world')} />
+        <WorldSection wb={wb} isComplete={isComplete} genre={project?.genre} onReAnalyze={() => openFeedback('请改进世界观分析：', 'world')} />
 
         <EditableScenePlanTable
           items={scenePlan}
