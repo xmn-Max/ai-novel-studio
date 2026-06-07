@@ -18,8 +18,8 @@
 - **实时进度**：SSE 推送 8 步流水线进度
 - **插件系统**：编剧点评（三幕式/节奏/角色弧光/对白评价）、爆款分析（爆点/标题/钩子/高光场景）
 - **YAML 预览 + 下载**
-- **小说类型系统**：6 种内置类型 + 用户自定义类型（最多 10 个），每种有独立 AI 分析指引
-- **黑暗模式**
+- **深度审阅**：版本对比行数差 > 30 行时触发，AI 审阅原文 + 两版 YAML + 用户意见，综合生成新剧本
+- **小说类型系统**：6 种内置类型 + 用户自定义类型（最多 10 个），每种有独立 AI 分析指引和世界观维度
 
 ## 技术栈
 
@@ -73,7 +73,7 @@ ai-novel-studio/
 │   ├── main.py                      # FastAPI 路由（31 个端点）
 │   ├── models.py                    # Pydantic 数据模型
 │   ├── pipeline.py                  # 8 步 AI 流水线 + 重新询问
-│   ├── prompts.py                   # LLM Prompt 模板（13 个）
+│   ├── prompts.py                   # LLM Prompt 模板（15 个）
 │   ├── plugins.py                   # 插件系统（编剧点评/爆款分析）
 │   ├── services/
 │   │   └── project_service.py       # 业务逻辑层
@@ -88,7 +88,7 @@ ai-novel-studio/
 ├── frontend/
 │   └── src/
 │       ├── App.tsx                  # 路由入口
-│       ├── api.ts                   # API 客户端（32 个函数）
+│   ├── api.ts                   # API 客户端（33 个函数）
 │       ├── main.tsx
 │       └── components/
 │           ├── LoginPage.tsx         # 登录/注册
